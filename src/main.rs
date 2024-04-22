@@ -2,28 +2,56 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-use embassy_net::tcp::TcpSocket;
-use embassy_net::{
-    Config, IpListenEndpoint, Ipv4Address, Ipv4Cidr, Stack, StackResources, StaticConfigV4,
-};
-use esp_hal as hal;
+mod socket;
+mod sta;
 
 use embassy_executor::Spawner;
+use embassy_net::{Config, Stack, StackResources};
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
-use esp_println::{print, println};
-use esp_wifi::wifi::{AccessPointConfiguration, Configuration};
-use esp_wifi::wifi::{WifiApDevice, WifiController, WifiDevice, WifiEvent, WifiState};
+use esp_hal as hal;
+use esp_println::println;
+use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
 use esp_wifi::{initialize, EspWifiInitFor};
 use hal::clock::ClockControl;
 use hal::rng::Rng;
 use hal::{embassy, peripherals::Peripherals, prelude::*, timer::TimerGroup};
+use log::LevelFilter;
+use log::{info, Level, Metadata, Record};
 use static_cell::make_static;
+
+use crate::socket::listen_task;
+use crate::sta::connection;
+
+const SSID: &str = env!("SSID");
+const PASSWORD: &str = env!("PASSWORD");
+const MAX_CONNECTIONS: usize = 5;
+
+struct SimpleLogger;
+
+impl log::Log for SimpleLogger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        metadata.level() <= Level::Info
+    }
+
+    fn log(&self, record: &Record) {
+        if self.enabled(record.metadata()) {
+            println!("{} - {}", record.level(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+
+static LOGGER: SimpleLogger = SimpleLogger;
 
 #[main]
 async fn main(spawner: Spawner) -> ! {
     #[cfg(feature = "log")]
     esp_println::logger::init_logger(log::LevelFilter::Info);
+    log::set_logger(&LOGGER)
+        .map(|()| log::set_max_level(LevelFilter::Info))
+        .unwrap();
 
     let peripherals = Peripherals::take();
 
@@ -45,16 +73,12 @@ async fn main(spawner: Spawner) -> ! {
 
     let wifi = peripherals.WIFI;
     let (wifi_interface, controller) =
-        esp_wifi::wifi::new_with_mode(&init, wifi, WifiApDevice).unwrap();
+        esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
 
     let timer_group0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
     embassy::init(&clocks, timer_group0);
 
-    let config = Config::ipv4_static(StaticConfigV4 {
-        address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 2, 1), 24),
-        gateway: Some(Ipv4Address::from_bytes(&[192, 168, 2, 1])),
-        dns_servers: Default::default(),
-    });
+    let config = Config::dhcpv4(Default::default());
 
     let seed = 1234; // very random, very secure seed
 
@@ -62,15 +86,12 @@ async fn main(spawner: Spawner) -> ! {
     let stack = &*make_static!(Stack::new(
         wifi_interface,
         config,
-        make_static!(StackResources::<3>::new()),
+        make_static!(StackResources::<{ 5 + MAX_CONNECTIONS }>::new()),
         seed
     ));
 
     spawner.spawn(connection(controller)).ok();
     spawner.spawn(net_task(&stack)).ok();
-
-    let mut rx_buffer = [0; 1536];
-    let mut tx_buffer = [0; 1536];
 
     loop {
         if stack.is_link_up() {
@@ -78,113 +99,27 @@ async fn main(spawner: Spawner) -> ! {
         }
         Timer::after(Duration::from_millis(500)).await;
     }
-    println!("Connect to the AP `esp-wifi` and point your browser to http://192.168.2.1:8080/");
-    println!("Use a static IP in the range 192.168.2.2 .. 192.168.2.255, use gateway 192.168.2.1");
 
-    let mut socket = TcpSocket::new(&stack, &mut rx_buffer, &mut tx_buffer);
-    socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
+    info!("Waiting to get IP address...");
     loop {
-        println!("Wait for connection...");
-        let r = socket
-            .accept(IpListenEndpoint {
-                addr: None,
-                port: 8080,
-            })
-            .await;
-        println!("Connected...");
-
-        if let Err(e) = r {
-            println!("connect error: {:?}", e);
-            continue;
+        if let Some(config) = stack.config_v4() {
+            info!("Got IP: {}", config.address);
+            break;
         }
+        Timer::after(Duration::from_millis(500)).await;
+    }
 
-        use embedded_io_async::Write;
+    // spawn listeners for concurrent connections
+    for i in 0..MAX_CONNECTIONS {
+        spawner.spawn(listen_task(&stack, i, 123)).ok();
+    }
 
-        let mut buffer = [0u8; 1024];
-        let mut pos = 0;
-        loop {
-            match socket.read(&mut buffer).await {
-                Ok(0) => {
-                    println!("read EOF");
-                    break;
-                }
-                Ok(len) => {
-                    let to_print =
-                        unsafe { core::str::from_utf8_unchecked(&buffer[..(pos + len)]) };
-
-                    if to_print.contains("\r\n\r\n") {
-                        print!("{}", to_print);
-                        println!();
-                        break;
-                    }
-
-                    pos += len;
-                }
-                Err(e) => {
-                    println!("read error: {:?}", e);
-                    break;
-                }
-            };
-        }
-
-        let r = socket
-            .write_all(
-                b"HTTP/1.0 200 OK\r\n\r\n\
-            <html>\
-                <body>\
-                    <h1>Hello Rust! Hello esp-wifi!</h1>\
-                </body>\
-            </html>\r\n\
-            ",
-            )
-            .await;
-		println!("sent");
-        if let Err(e) = r {
-            println!("write error: {:?}", e);
-        }
-		
-        let r = socket.flush().await;
-        if let Err(e) = r {
-            println!("flush error: {:?}", e);
-        }
-		println!("flushed");
-        //Timer::after(Duration::from_millis(1000)).await;
-
-        socket.close();
-        //Timer::after(Duration::from_millis(1000)).await;
-		println!("closed");
-        socket.abort();
-		println!("aborted");
+    loop {
+        Timer::after(Duration::from_millis(1000)).await;
     }
 }
 
 #[embassy_executor::task]
-async fn connection(mut controller: WifiController<'static>) {
-    println!("start connection task");
-    println!("Device capabilities: {:?}", controller.get_capabilities());
-    loop {
-        match esp_wifi::wifi::get_wifi_state() {
-            WifiState::ApStarted => {
-                // wait until we're no longer connected
-                controller.wait_for_event(WifiEvent::ApStop).await;
-                Timer::after(Duration::from_millis(5000)).await
-            }
-            _ => {}
-        }
-        if !matches!(controller.is_started(), Ok(true)) {
-            let client_config = Configuration::AccessPoint(AccessPointConfiguration {
-                ssid: "esp-wifi".try_into().unwrap(),
-                ..Default::default()
-            });
-            controller.set_configuration(&client_config).unwrap();
-            println!("Starting wifi");
-            controller.start().await.unwrap();
-            println!("Wifi started!");
-        }
-    }
-}
-
-#[embassy_executor::task]
-async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiApDevice>>) {
+async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
     stack.run().await
 }
