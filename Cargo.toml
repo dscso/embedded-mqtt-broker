@@ -64,8 +64,8 @@ embassy-net = { version = "0.4.0", features = [
     "proto-ipv4",
 ] }
 embassy-executor = { version = "0.5.0", features = [
-    "task-arena-size-81920",
     "integrated-timers",
+    "nightly"
 ] }
 
 

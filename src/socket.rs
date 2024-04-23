@@ -54,5 +54,9 @@ pub async fn listen_task(
                 break;
             }
         }
+        if let Err(e) = socket.flush().await {
+            warn!("flush error: {:?}", e);
+        }
+        socket.close();
     }
 }

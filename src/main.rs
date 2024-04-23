@@ -25,7 +25,7 @@ use crate::sta::connection;
 
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
-const MAX_CONNECTIONS: usize = 5;
+const MAX_CONNECTIONS: usize = 20;
 
 struct SimpleLogger;
 
@@ -57,6 +57,11 @@ async fn main(spawner: Spawner) -> ! {
 
     let system = peripherals.SYSTEM.split();
     let clocks = ClockControl::max(system.clock_control).freeze();
+    let mut rng = Rng::new(peripherals.RNG);
+
+    let (seed_hi, seed_lo) = (rng.random(), rng.random());
+    let seed = (seed_hi as u64) << 32 | seed_lo as u64;
+    info!("Seed: {:x}", seed);
 
     #[cfg(target_arch = "xtensa")]
     let timer = hal::timer::TimerGroup::new(peripherals.TIMG1, &clocks, None).timer0;
@@ -65,7 +70,7 @@ async fn main(spawner: Spawner) -> ! {
     let init = initialize(
         EspWifiInitFor::Wifi,
         timer,
-        Rng::new(peripherals.RNG),
+        rng,
         system.radio_clock_control,
         &clocks,
     )
@@ -76,11 +81,10 @@ async fn main(spawner: Spawner) -> ! {
         esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
 
     let timer_group0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
+
     embassy::init(&clocks, timer_group0);
 
     let config = Config::dhcpv4(Default::default());
-
-    let seed = 1234; // very random, very secure seed
 
     // Init network stack
     let stack = &*make_static!(Stack::new(
@@ -111,7 +115,7 @@ async fn main(spawner: Spawner) -> ! {
 
     // spawn listeners for concurrent connections
     for i in 0..MAX_CONNECTIONS {
-        spawner.spawn(listen_task(&stack, i, 123)).ok();
+        spawner.spawn(listen_task(&stack, i, 8080)).ok();
     }
 
     loop {
