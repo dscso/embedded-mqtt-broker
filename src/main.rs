@@ -7,6 +7,8 @@ mod sta;
 
 use embassy_executor::Spawner;
 use embassy_net::{Config, Stack, StackResources};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::pubsub::PubSubChannel;
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal as hal;
@@ -25,7 +27,7 @@ use crate::sta::connection;
 
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
-const MAX_CONNECTIONS: usize = 20;
+const MAX_CONNECTIONS: usize = 10;
 
 struct SimpleLogger;
 
@@ -113,10 +115,21 @@ async fn main(spawner: Spawner) -> ! {
         Timer::after(Duration::from_millis(500)).await;
     }
 
+    let channel = make_static!(PubSubChannel::<NoopRawMutex, u8, 100, 2, 2>::new());
+    let sender0 = make_static!(channel.publisher().unwrap());
+    let receiver0 = make_static!(channel.subscriber().unwrap());
+    let sender1 = make_static!(channel.publisher().unwrap());
+    let receiver1 = make_static!(channel.subscriber().unwrap());
+
     // spawn listeners for concurrent connections
-    for i in 0..MAX_CONNECTIONS {
-        spawner.spawn(listen_task(&stack, i, 8080)).ok();
-    }
+    //for i in 0..MAX_CONNECTIONS {
+    spawner
+        .spawn(listen_task(&stack, 0, 8080, sender0, receiver0))
+        .ok();
+    spawner
+        .spawn(listen_task(&stack, 1, 8080, sender1, receiver1))
+        .ok();
+    //}
 
     loop {
         Timer::after(Duration::from_millis(1000)).await;

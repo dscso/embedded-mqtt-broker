@@ -1,7 +1,11 @@
 use crate::MAX_CONNECTIONS;
+use embassy_futures::select::select;
+use embassy_futures::select::Either::{First, Second};
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
-use embassy_time::{Duration, Timer};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::pubsub::{Publisher, Subscriber, WaitResult};
+use embassy_time::Duration;
 use embedded_io_async::Write;
 use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
 use log::{info, warn};
@@ -11,6 +15,8 @@ pub async fn listen_task(
     stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
     id: usize,
     port: u16,
+    sender: &'static Publisher<'static, NoopRawMutex, u8, 100, 2, 2>,
+    receiver: &'static mut Subscriber<'static, NoopRawMutex, u8, 100, 2, 2>,
 ) {
     let mut rx_buffer = [0; 1024];
     let mut tx_buffer = [0; 1024];
@@ -31,28 +37,34 @@ pub async fn listen_task(
             socket.remote_endpoint()
         );
 
-        loop {
-            let n = match socket.read(&mut buf).await {
-                Ok(0) => {
+        'inner: loop {
+            let n = match select(socket.read(&mut buf), receiver.next_message()).await {
+                First(Ok(0)) => {
                     warn!("read EOF");
                     break;
                 }
-                Ok(n) => n,
-                Err(e) => {
+                First(Ok(n)) => n,
+                First(Err(e)) => {
                     warn!("SOCKET {}: {:?}", id, e);
                     break;
                 }
+                Second(WaitResult::Message(e)) => {
+                    socket.write_all(&[e]).await.expect("TODO: panic message");
+                    continue 'inner;
+                }
+                Second(WaitResult::Lagged(e)) => {
+                    warn!("lagged {e}");
+                    break;
+                }
             };
+            for i in 0..n {
+                sender.publish(buf[i]).await;
+            }
             info!(
                 "SOCKET {}: rxd {}",
                 id,
                 core::str::from_utf8(&buf[..n]).unwrap_or_else(|_| "<invalid utf8>")
             );
-            Timer::after(Duration::from_millis(1000)).await;
-            if let Err(e) = socket.write_all(&buf[..n]).await {
-                warn!("write error: {:?}", e);
-                break;
-            }
         }
         if let Err(e) = socket.flush().await {
             warn!("flush error: {:?}", e);
