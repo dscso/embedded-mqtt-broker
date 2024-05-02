@@ -54,11 +54,12 @@ pub async fn listen_task(
                 }
                 Second(WaitResult::Lagged(e)) => {
                     warn!("lagged {e}");
-                    break;
+                    continue 'inner;
+                    //break;
                 }
             };
             for i in 0..n {
-                sender.publish(buf[i]).await;
+                sender.publish_immediate(buf[i]);
             }
             info!(
                 "SOCKET {}: rxd {}",
