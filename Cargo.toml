@@ -81,7 +81,9 @@ smoltcp = { version = "0.11.0", default-features = false, features = [
     "socket-tcp",
     "socket-udp",
 ] }
-
+embedded-alloc = "0.5.1"
+async-broadcast = { git = "https://github.com/dscso/async-broadcast.git", rev = "2842aad", default-features = false}
+futures-util = { version = "0.3.30" , default-features = false}
 
 [profile.dev.package.esp-wifi]
 opt-level = 3

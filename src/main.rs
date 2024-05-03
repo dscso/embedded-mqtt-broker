@@ -2,17 +2,18 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
+mod distributor;
 mod socket;
 mod sta;
 
+use crate::distributor::Distributor;
 use embassy_executor::Spawner;
 use embassy_net::{Config, Stack, StackResources};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::pubsub::PubSubChannel;
 use embassy_time::{Duration, Timer};
+use embedded_alloc::Heap;
 use esp_backtrace as _;
 use esp_hal as hal;
-use esp_println::println;
+use esp_println::{print, println};
 use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
 use esp_wifi::{initialize, EspWifiInitFor};
 use hal::clock::ClockControl;
@@ -27,9 +28,14 @@ use crate::sta::connection;
 
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
-const MAX_CONNECTIONS: usize = 10;
+const MAX_CONNECTIONS: usize = 4;
+const HEAP_SIZE: usize = 1024 * 4;
 
 struct SimpleLogger;
+#[global_allocator]
+static HEAP: Heap = Heap::empty();
+
+extern crate alloc;
 
 impl log::Log for SimpleLogger {
     fn enabled(&self, metadata: &Metadata) -> bool {
@@ -38,7 +44,14 @@ impl log::Log for SimpleLogger {
 
     fn log(&self, record: &Record) {
         if self.enabled(record.metadata()) {
-            println!("{} - {}", record.level(), record.args());
+            print!("{} ", record.level());
+            if let Some(file) = record.file() {
+                print!("{}", file);
+            }
+            if let Some(line) = record.line() {
+                print!(":{} ", line);
+            }
+            println!("{}", record.args());
         }
     }
 
@@ -54,7 +67,12 @@ async fn main(spawner: Spawner) -> ! {
     log::set_logger(&LOGGER)
         .map(|()| log::set_max_level(LevelFilter::Info))
         .unwrap();
-
+    // initialize heap
+    {
+        use core::mem::MaybeUninit;
+        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
+    }
     let peripherals = Peripherals::take();
 
     let system = peripherals.SYSTEM.split();
@@ -96,6 +114,7 @@ async fn main(spawner: Spawner) -> ! {
         seed
     ));
 
+    spawner.spawn(watchdog()).ok();
     spawner.spawn(connection(controller)).ok();
     spawner.spawn(net_task(&stack)).ok();
 
@@ -115,21 +134,14 @@ async fn main(spawner: Spawner) -> ! {
         Timer::after(Duration::from_millis(500)).await;
     }
 
-    let channel = make_static!(PubSubChannel::<NoopRawMutex, u8, 100, 2, 2>::new());
-    let sender0 = make_static!(channel.publisher().unwrap());
-    let receiver0 = make_static!(channel.subscriber().unwrap());
-    let sender1 = make_static!(channel.publisher().unwrap());
-    let receiver1 = make_static!(channel.subscriber().unwrap());
+    let distributor = make_static!(Distributor::default());
 
     // spawn listeners for concurrent connections
-    //for i in 0..MAX_CONNECTIONS {
-    spawner
-        .spawn(listen_task(&stack, 0, 8080, sender0, receiver0))
-        .ok();
-    spawner
-        .spawn(listen_task(&stack, 1, 8080, sender1, receiver1))
-        .ok();
-    //}
+    for i in 0..MAX_CONNECTIONS {
+        spawner
+            .spawn(listen_task(&stack, i, 8080, distributor))
+            .ok();
+    }
 
     loop {
         Timer::after(Duration::from_millis(1000)).await;
@@ -139,4 +151,13 @@ async fn main(spawner: Spawner) -> ! {
 #[embassy_executor::task]
 async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
     stack.run().await
+}
+
+#[embassy_executor::task]
+async fn watchdog() {
+    loop {
+        println!("heap: {}", HEAP.used());
+
+        Timer::after(Duration::from_secs(10)).await;
+    }
 }
