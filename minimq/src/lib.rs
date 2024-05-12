@@ -63,21 +63,21 @@
 
 pub mod broker;
 pub mod config;
-mod de;
-mod message_types;
+pub mod de;
+pub mod message_types;
 pub mod mqtt_client;
-mod network_manager;
-mod packets;
-mod properties;
+pub mod network_manager;
+pub mod packets;
+pub mod properties;
 pub mod publication;
-mod reason_codes;
-mod republication;
-mod ring_buffer;
-mod ser;
-mod session_state;
+pub mod reason_codes;
+pub mod republication;
+pub mod ring_buffer;
+pub mod ser;
+pub mod session_state;
 pub mod types;
-mod varint;
-mod will;
+pub mod varint;
+pub mod will;
 
 pub use broker::Broker;
 pub use config::ConfigBuilder;

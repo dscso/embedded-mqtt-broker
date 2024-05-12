@@ -10,9 +10,11 @@ use super::deserializer::MqttDeserializer;
 use bit_field::BitField;
 use core::convert::TryFrom;
 use serde::Deserialize;
+use crate::packets::Connect;
 
 #[derive(Debug)]
 pub enum ReceivedPacket<'a> {
+    Connect(Connect<'a>),
     ConnAck(ConnAck<'a>),
     Publish(Pub<'a, &'a [u8]>),
     PubAck(PubAck<'a>),

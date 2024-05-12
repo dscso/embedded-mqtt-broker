@@ -20,7 +20,7 @@ pub async fn listen_task(
     let mut rx_buffer = [0; 1600];
     let mut tx_buffer = [0; 1600];
     let mut buf = [0; 1024*2];
-    //let mut reader = PacketReader::new(&mut buf);
+    let mut reader = PacketReader::new(&mut buf);
 
     loop {
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
@@ -50,8 +50,8 @@ pub async fn listen_task(
                     break;
                 }
             };
-            /*let packet = ReceivedPacket::from_buffer(&buf[..n]);
-            info!("rcv {n}bytes: {:?} {:?}", packet, &buf[..n]);*/
+            let packet = ReceivedPacket::from_buffer(&buf[..n]);
+            info!("rcv {n}bytes: {:?} {:?}", packet, &buf[..n]);
             let ack = [
                 0x20u8, 0x03, // Remaining length = 3 bytes
                 0x00, // Connect acknowledge flags - bit 0 clear.
