@@ -94,7 +94,7 @@ async fn main(spawner: Spawner) -> ! {
     // spawn listeners for concurrent connections
     for i in 0..MAX_CONNECTIONS {
         spawner
-            .spawn(listen_task(&stack, i, 8080))
+            .spawn(listen_task(&stack, i, 1883))
             .ok();
     }
     loop {

@@ -6,6 +6,10 @@ use embassy_time::{Duration, Instant};
 use embedded_io_async::{Write, WriteReady};
 use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
 use log::{error, info, warn};
+use minimq::de::deserializer;
+use minimq::de::packet_reader::PacketReader;
+use minimq::de::received_packet::ReceivedPacket;
+use minimq::ProtocolError::Deserialization;
 
 #[embassy_executor::task(pool_size = MAX_CONNECTIONS)]
 pub async fn listen_task(
@@ -15,7 +19,8 @@ pub async fn listen_task(
 ) {
     let mut rx_buffer = [0; 1600];
     let mut tx_buffer = [0; 1600];
-    let mut buf = [0; 64];
+    let mut buf = [0; 1024*2];
+    //let mut reader = PacketReader::new(&mut buf);
 
     loop {
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
@@ -45,12 +50,17 @@ pub async fn listen_task(
                     break;
                 }
             };
-
-            info!("rcv {}", core::str::from_utf8(&buf[..n]).unwrap_or_else(|_| "<invalid utf8>"));
-            if socket.write_ready().is_err() {
-                error!("{:?}", socket.write_ready());
-            }
-            let time = Instant::now();
+            /*let packet = ReceivedPacket::from_buffer(&buf[..n]);
+            info!("rcv {n}bytes: {:?} {:?}", packet, &buf[..n]);*/
+            let ack = [
+                0x20u8, 0x03, // Remaining length = 3 bytes
+                0x00, // Connect acknowledge flags - bit 0 clear.
+                0x00, // Connect reason code - 0 (Success)
+                0x00, // Property length = 0
+                // No payload.
+            ];
+            socket.write(&ack).await.unwrap();
+            /*let time = Instant::now();
             socket
                 .write_all(&buf[..n])
                 .await
@@ -62,7 +72,7 @@ pub async fn listen_task(
                 "SOCKET {}: rxd {}",
                 id,
                 core::str::from_utf8(&buf[..n]).unwrap_or_else(|_| "<invalid utf8>")
-            );
+            );*/
         }
         socket.close();
     }
