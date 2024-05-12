@@ -1,22 +1,17 @@
 use core::ops::Sub;
-use crate::distributor::Distributor;
 use crate::MAX_CONNECTIONS;
-use embassy_futures::select::select;
-use embassy_futures::select::Either::{First, Second};
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_time::{Duration, Instant};
 use embedded_io_async::{Write, WriteReady};
 use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
-use futures_util::StreamExt;
 use log::{error, info, warn};
 
 #[embassy_executor::task(pool_size = MAX_CONNECTIONS)]
 pub async fn listen_task(
     stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
     id: usize,
-    port: u16,
-    distributor: &'static Distributor,
+    port: u16
 ) {
     let mut rx_buffer = [0; 1600];
     let mut tx_buffer = [0; 1600];
@@ -38,50 +33,30 @@ pub async fn listen_task(
             socket.remote_endpoint()
         );
 
-        let publisher = distributor.add_publisher("hi").await;
-        let mut subscriber = distributor.add_subscriber("hi").await;
-        let mut subscriber2 = distributor.add_subscriber("hi").await;
-        'inner: loop {
-            let _ = subscriber2.try_recv();
-            let _ = subscriber2.try_recv();
-            let _ = subscriber2.try_recv();
-            let n = match select(socket.read(&mut buf), subscriber.next()).await {
-                First(Ok(0)) => {
+        loop {
+            let n = match socket.read(&mut buf).await {
+                Ok(0) => {
                     warn!("read EOF");
                     break;
-                }
-                First(Ok(n)) => n,
-                First(Err(e)) => {
+                },
+                Ok(n) => n,
+                Err(e) => {
                     warn!("SOCKET {}: {:?}", id, e);
-                    break;
-                }
-                Second(Some(e)) => {
-                    info!(
-                        "received something form channel {}",
-                        core::str::from_utf8(&e[..]).unwrap_or_else(|_| "<invalid utf8>")
-                    );
-                    if socket.write_ready().is_err() {
-                        error!("{:?}", socket.write_ready());
-                    }
-                    let time = Instant::now();
-                    socket
-                        .write_all(e.as_slice())
-                        .await
-                        .unwrap();
-                    let end = Instant::now();
-                    info!("send took: {}ms", end.sub(time).as_millis());
-                    continue 'inner;
-                }
-                Second(None) => {
-                    warn!("channel closed");
                     break;
                 }
             };
 
-            publisher
-                .broadcast(buf[..n].to_vec())
+            info!("rcv {}", core::str::from_utf8(&buf[..n]).unwrap_or_else(|_| "<invalid utf8>"));
+            if socket.write_ready().is_err() {
+                error!("{:?}", socket.write_ready());
+            }
+            let time = Instant::now();
+            socket
+                .write_all(&buf[..n])
                 .await
                 .unwrap();
+            let end = Instant::now();
+            info!("send took: {}us", end.sub(time).as_micros());
 
             info!(
                 "SOCKET {}: rxd {}",

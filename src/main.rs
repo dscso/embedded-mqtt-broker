@@ -2,77 +2,35 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-mod distributor;
-mod socket;
 mod sta;
+mod socket;
 
-use crate::distributor::Distributor;
+
 use embassy_executor::Spawner;
 use embassy_net::{Config, Stack, StackResources};
+use embassy_net::dns::DnsQueryType;
 use embassy_time::{Duration, Timer};
-use embedded_alloc::Heap;
 use esp_backtrace as _;
 use esp_hal as hal;
-use esp_println::{print, println};
+use esp_println::{println};
 use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
 use esp_wifi::{initialize, EspWifiInitFor};
 use hal::clock::ClockControl;
 use hal::rng::Rng;
 use hal::{embassy, peripherals::Peripherals, prelude::*, timer::TimerGroup};
-use log::LevelFilter;
-use log::{info, Level, Metadata, Record};
+use log::info;
 use static_cell::make_static;
-
 use crate::socket::listen_task;
 use crate::sta::connection;
 
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
 const MAX_CONNECTIONS: usize = 4;
-const HEAP_SIZE: usize = 1024 * 4;
-
-struct SimpleLogger;
-#[global_allocator]
-static HEAP: Heap = Heap::empty();
-
-extern crate alloc;
-
-impl log::Log for SimpleLogger {
-    fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= Level::Info
-    }
-
-    fn log(&self, record: &Record) {
-        if self.enabled(record.metadata()) {
-            print!("{} ", record.level());
-            if let Some(file) = record.file() {
-                print!("{}", file);
-            }
-            if let Some(line) = record.line() {
-                print!(":{} ", line);
-            }
-            println!("{}", record.args());
-        }
-    }
-
-    fn flush(&self) {}
-}
-
-static LOGGER: SimpleLogger = SimpleLogger;
 
 #[main]
 async fn main(spawner: Spawner) -> ! {
-    #[cfg(feature = "log")]
     esp_println::logger::init_logger(log::LevelFilter::Info);
-    log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(LevelFilter::Info))
-        .unwrap();
-    // initialize heap
-    {
-        use core::mem::MaybeUninit;
-        static mut HEAP_MEM: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
-        unsafe { HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE) }
-    }
+
     let peripherals = Peripherals::take();
 
     let system = peripherals.SYSTEM.split();
@@ -84,9 +42,9 @@ async fn main(spawner: Spawner) -> ! {
     info!("Seed: {:x}", seed);
 
     #[cfg(target_arch = "xtensa")]
-    let timer = hal::timer::TimerGroup::new(peripherals.TIMG1, &clocks, None).timer0;
+        let timer = hal::timer::TimerGroup::new(peripherals.TIMG1, &clocks, None).timer0;
     #[cfg(target_arch = "riscv32")]
-    let timer = hal::systimer::SystemTimer::new(peripherals.SYSTIMER).alarm0;
+        let timer = hal::systimer::SystemTimer::new(peripherals.SYSTIMER).alarm0;
     let init = initialize(
         EspWifiInitFor::Wifi,
         timer,
@@ -94,14 +52,13 @@ async fn main(spawner: Spawner) -> ! {
         system.radio_clock_control,
         &clocks,
     )
-    .unwrap();
+        .unwrap();
 
     let wifi = peripherals.WIFI;
     let (wifi_interface, controller) =
         esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
 
     let timer_group0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
-
     embassy::init(&clocks, timer_group0);
 
     let config = Config::dhcpv4(Default::default());
@@ -114,7 +71,6 @@ async fn main(spawner: Spawner) -> ! {
         seed
     ));
 
-    spawner.spawn(watchdog()).ok();
     spawner.spawn(connection(controller)).ok();
     spawner.spawn(net_task(&stack)).ok();
 
@@ -125,39 +81,32 @@ async fn main(spawner: Spawner) -> ! {
         Timer::after(Duration::from_millis(500)).await;
     }
 
-    info!("Waiting to get IP address...");
+    println!("Waiting to get IP address...");
     loop {
         if let Some(config) = stack.config_v4() {
-            info!("Got IP: {}", config.address);
+            println!("Got IP: {}", config.address);
             break;
         }
         Timer::after(Duration::from_millis(500)).await;
     }
 
-    let distributor = make_static!(Distributor::default());
 
     // spawn listeners for concurrent connections
     for i in 0..MAX_CONNECTIONS {
         spawner
-            .spawn(listen_task(&stack, i, 8080, distributor))
+            .spawn(listen_task(&stack, i, 8080))
             .ok();
     }
-
     loop {
-        Timer::after(Duration::from_millis(1000)).await;
+        //let res = Some(0);
+        let res = stack.dns_query("google.de", DnsQueryType::A).await;
+        info!("DNS query result: {:?}", res);
+        Timer::after(Duration::from_secs(10)).await;
     }
 }
+
 
 #[embassy_executor::task]
 async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
     stack.run().await
-}
-
-#[embassy_executor::task]
-async fn watchdog() {
-    loop {
-        println!("heap: {}", HEAP.used());
-
-        Timer::after(Duration::from_secs(10)).await;
-    }
 }

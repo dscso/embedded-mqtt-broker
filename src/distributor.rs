@@ -1,60 +1,28 @@
-use alloc::collections::BTreeMap;
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
-use async_broadcast::{broadcast, Receiver, Sender};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::mutex::Mutex;
-use esp_println::println;
+use embassy_sync::channel::{Channel, Receiver, Sender};
 
-pub type Msg = Vec<u8>;
+pub type Msg = u8;
+const MAX_MSG_CHANNEL: usize = 10;
+type DistributorChannel = Channel<NoopRawMutex, Msg, MAX_MSG_CHANNEL>;
+type DistributorSender<'a> = Sender<'a, NoopRawMutex, Msg, MAX_MSG_CHANNEL>;
 
 struct InnerDistributor {
-    topics: BTreeMap<String, Sender<Msg>>,
+    channel: DistributorChannel,
 }
 pub struct Distributor {
-    inner: Mutex<NoopRawMutex, InnerDistributor>,
+    channel: DistributorChannel,
+    //inner: Mutex<NoopRawMutex, InnerDistributor>,
 }
 
-impl Distributor {
-    pub async fn add_publisher(&self, name: &str) -> Sender<Msg> {
-        if let Some(sender) = self.inner.lock().await.topics.get(name) {
-            if !sender.is_closed() {
-                return sender.clone();
-            }
-        }
-        println!("CREATING NEW CHANNEL!!! {}", name);
-        let (sender, _) = broadcast(10);
-        let ret_sender = sender.clone();
-        self.inner
-            .lock()
-            .await
-            .topics
-            .insert(name.to_string(), sender);
-        ret_sender
-    }
-    pub async fn add_subscriber(&self, name: &str) -> Receiver<Msg> {
-        if let Some(sender) = self.inner.lock().await.topics.get(name) {
-            if !sender.is_closed() {
-                return sender.new_receiver();
-            }
-        }
-        println!("CREATING NEW CHANNEL!!! {}", name);
-        let (sender, receiver) = broadcast(10);
-        self.inner
-            .lock()
-            .await
-            .topics
-            .insert(name.to_string(), sender);
-        receiver
-    }
-}
-
-impl Default for Distributor {
-    fn default() -> Self {
+impl<'a> Distributor {
+    pub async fn new() -> Self {
+        let channel = Channel::new();
         Self {
-            inner: Mutex::new(InnerDistributor {
-                topics: BTreeMap::new(),
-            }),
+            channel
+        //    inner
         }
+    }
+    pub fn publish(&self, msg: Msg) {
+        self.channel.try_send(msg).unwrap();
     }
 }

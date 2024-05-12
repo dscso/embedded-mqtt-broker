@@ -4,7 +4,7 @@ use esp_wifi::wifi::{ClientConfiguration, Configuration, WifiController, WifiEve
 use log::{info, warn};
 
 #[embassy_executor::task]
-pub async fn connection(mut controller: WifiController<'static>) {
+pub(crate) async fn connection(mut controller: WifiController<'static>) {
     info!("start connection task");
     info!("Device capabilities: {:?}", controller.get_capabilities());
     loop {
