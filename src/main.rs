@@ -2,17 +2,18 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-mod sta;
 mod socket;
+mod sta;
 
-
+use crate::socket::listen_task;
+use crate::sta::connection;
 use embassy_executor::Spawner;
-use embassy_net::{Config, Stack, StackResources};
 use embassy_net::dns::DnsQueryType;
+use embassy_net::{Config, Stack, StackResources};
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal as hal;
-use esp_println::{println};
+use esp_println::println;
 use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
 use esp_wifi::{initialize, EspWifiInitFor};
 use hal::clock::ClockControl;
@@ -20,8 +21,6 @@ use hal::rng::Rng;
 use hal::{embassy, peripherals::Peripherals, prelude::*, timer::TimerGroup};
 use log::info;
 use static_cell::make_static;
-use crate::socket::listen_task;
-use crate::sta::connection;
 
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
@@ -42,9 +41,9 @@ async fn main(spawner: Spawner) -> ! {
     info!("Seed: {:x}", seed);
 
     #[cfg(target_arch = "xtensa")]
-        let timer = hal::timer::TimerGroup::new(peripherals.TIMG1, &clocks, None).timer0;
+    let timer = hal::timer::TimerGroup::new(peripherals.TIMG1, &clocks, None).timer0;
     #[cfg(target_arch = "riscv32")]
-        let timer = hal::systimer::SystemTimer::new(peripherals.SYSTIMER).alarm0;
+    let timer = hal::systimer::SystemTimer::new(peripherals.SYSTIMER).alarm0;
     let init = initialize(
         EspWifiInitFor::Wifi,
         timer,
@@ -52,7 +51,7 @@ async fn main(spawner: Spawner) -> ! {
         system.radio_clock_control,
         &clocks,
     )
-        .unwrap();
+    .unwrap();
 
     let wifi = peripherals.WIFI;
     let (wifi_interface, controller) =
@@ -90,12 +89,9 @@ async fn main(spawner: Spawner) -> ! {
         Timer::after(Duration::from_millis(500)).await;
     }
 
-
     // spawn listeners for concurrent connections
     for i in 0..MAX_CONNECTIONS {
-        spawner
-            .spawn(listen_task(&stack, i, 1883))
-            .ok();
+        spawner.spawn(listen_task(stack, i, 1883)).ok();
     }
     loop {
         //let res = Some(0);
@@ -104,7 +100,6 @@ async fn main(spawner: Spawner) -> ! {
         Timer::after(Duration::from_secs(10)).await;
     }
 }
-
 
 #[embassy_executor::task]
 async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {

@@ -1,26 +1,20 @@
-use core::ops::Sub;
 use crate::MAX_CONNECTIONS;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
-use embassy_time::{Duration, Instant};
-use embedded_io_async::{Write, WriteReady};
+use embassy_time::Duration;
 use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
-use log::{error, info, warn};
-use minimq::de::deserializer;
-use minimq::de::packet_reader::PacketReader;
-use minimq::de::received_packet::ReceivedPacket;
-use minimq::ProtocolError::Deserialization;
+use log::{info, warn};
+use mqtt_format::v5::packets::MqttPacket;
 
 #[embassy_executor::task(pool_size = MAX_CONNECTIONS)]
 pub async fn listen_task(
     stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
     id: usize,
-    port: u16
+    port: u16,
 ) {
     let mut rx_buffer = [0; 1600];
     let mut tx_buffer = [0; 1600];
-    let mut buf = [0; 1024*2];
-    let mut reader = PacketReader::new(&mut buf);
+    let mut buf = [0; 1024];
 
     loop {
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
@@ -43,21 +37,22 @@ pub async fn listen_task(
                 Ok(0) => {
                     warn!("read EOF");
                     break;
-                },
+                }
                 Ok(n) => n,
                 Err(e) => {
                     warn!("SOCKET {}: {:?}", id, e);
                     break;
                 }
             };
-            let packet = ReceivedPacket::from_buffer(&buf[..n]);
-            info!("rcv {n}bytes: {:?} {:?}", packet, &buf[..n]);
+            info!("rcv {n}bytes {:?}", &buf[..n]);
+            let packet = MqttPacket::parse_complete(&buf[..n]);
+            info!("decoded packet: {:?}", packet);
             let ack = [
                 0x20u8, 0x03, // Remaining length = 3 bytes
                 0x00, // Connect acknowledge flags - bit 0 clear.
                 0x00, // Connect reason code - 0 (Success)
                 0x00, // Property length = 0
-                // No payload.
+                      // No payload.
             ];
             socket.write(&ack).await.unwrap();
             /*let time = Instant::now();
