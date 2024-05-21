@@ -11,11 +11,10 @@ use mqtt_format::v5::packets::suback::{MSuback, SubackProperties};
 use mqtt_format::v5::packets::MqttPacket;
 use mqtt_format::v5::variable_header::PacketIdentifier;
 
-pub async fn listen<T>(
-    stack: &'static Stack<T>,
-    id: usize,
-    port: u16,
-) where T: Driver {
+pub async fn listen<T>(stack: &'static Stack<T>, id: usize, port: u16)
+where
+    T: Driver,
+{
     let mut rx_buffer = [0; 1600];
     let mut tx_buffer = [0; 1600];
 
