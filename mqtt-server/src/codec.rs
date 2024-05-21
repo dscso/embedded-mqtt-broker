@@ -105,7 +105,7 @@ where
 
     pub async fn write<'a>(&mut self, packet: MqttPacket<'a>) -> Result<(), ()> {
         // create a packet writer with the same size as the parser
-        let mut writer = PacketWriter::<N>::new();
+        let mut writer = PacketWriter::<N>::default();
         packet.write(&mut writer).map_err(|_| ())?;
         self.stream
             .write(writer.get_written_data())
@@ -120,13 +120,15 @@ pub struct PacketWriter<const N: usize> {
     pub write_index: usize,
 }
 
-impl<const N: usize> PacketWriter<N> {
-    pub fn new() -> Self {
+impl<const N: usize> Default for PacketWriter<N> {
+    fn default() -> Self {
         PacketWriter {
             buffer: [0; N],
             write_index: 0,
         }
     }
+}
+impl<const N: usize> PacketWriter<N> {
     pub fn get_written_data(&self) -> &[u8] {
         &self.buffer[..self.write_index]
     }
