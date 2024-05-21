@@ -2,9 +2,9 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
+mod codec;
 mod socket;
 mod sta;
-mod codec;
 
 #[global_allocator]
 static ALLOCATOR: emballoc::Allocator<4096> = emballoc::Allocator::new();
@@ -77,7 +77,7 @@ async fn main(spawner: Spawner) -> ! {
     ));
 
     spawner.spawn(connection(controller)).ok();
-    spawner.spawn(net_task(&stack)).ok();
+    spawner.spawn(net_task(stack)).ok();
 
     loop {
         if stack.is_link_up() {

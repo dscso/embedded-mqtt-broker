@@ -1,17 +1,16 @@
+use crate::codec::MqttCodec;
 use crate::MAX_CONNECTIONS;
 use core::num::NonZeroU16;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_time::Duration;
 use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
-use log::{error, info, warn};
+use log::{info, warn};
 use mqtt_format::v5::packets::connack::{ConnackProperties, ConnackReasonCode, MConnack};
 use mqtt_format::v5::packets::puback::{MPuback, PubackProperties, PubackReasonCode};
 use mqtt_format::v5::packets::suback::{MSuback, SubackProperties};
 use mqtt_format::v5::packets::MqttPacket;
 use mqtt_format::v5::variable_header::PacketIdentifier;
-use mqtt_format::v5::write::{WResult, WriteMqttPacket};
-use crate::codec::MqttCodec;
 
 #[embassy_executor::task(pool_size = MAX_CONNECTIONS)]
 pub async fn listen_task(
@@ -76,7 +75,7 @@ pub async fn listen_task(
                     info!(
                         "publish: {} the following data: {}",
                         publish.topic_name,
-                        core::str::from_utf8(publish.payload).unwrap_or_else(|_| "<invalid utf8>")
+                        core::str::from_utf8(publish.payload).unwrap_or("<invalid utf8>")
                     );
                     let pkg = MqttPacket::Puback(MPuback {
                         packet_identifier: publish
