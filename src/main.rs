@@ -4,6 +4,12 @@
 
 mod socket;
 mod sta;
+mod codec;
+
+#[global_allocator]
+static ALLOCATOR: emballoc::Allocator<4096> = emballoc::Allocator::new();
+
+extern crate alloc;
 
 use crate::socket::listen_task;
 use crate::sta::connection;
