@@ -1,10 +1,9 @@
 use crate::codec::MqttCodec;
-use crate::MAX_CONNECTIONS;
 use core::num::NonZeroU16;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
+use embassy_net_driver::Driver;
 use embassy_time::Duration;
-use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
 use log::{info, warn};
 use mqtt_format::v5::packets::connack::{ConnackProperties, ConnackReasonCode, MConnack};
 use mqtt_format::v5::packets::puback::{MPuback, PubackProperties, PubackReasonCode};
@@ -12,12 +11,11 @@ use mqtt_format::v5::packets::suback::{MSuback, SubackProperties};
 use mqtt_format::v5::packets::MqttPacket;
 use mqtt_format::v5::variable_header::PacketIdentifier;
 
-#[embassy_executor::task(pool_size = MAX_CONNECTIONS)]
-pub async fn listen_task(
-    stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
+pub async fn listen<T>(
+    stack: &'static Stack<T>,
     id: usize,
     port: u16,
-) {
+) where T: Driver {
     let mut rx_buffer = [0; 1600];
     let mut tx_buffer = [0; 1600];
 

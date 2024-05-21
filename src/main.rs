@@ -2,8 +2,6 @@
 #![no_main]
 #![feature(type_alias_impl_trait)]
 
-mod codec;
-mod socket;
 mod sta;
 
 #[global_allocator]
@@ -11,7 +9,6 @@ static ALLOCATOR: emballoc::Allocator<4096> = emballoc::Allocator::new();
 
 extern crate alloc;
 
-use crate::socket::listen_task;
 use crate::sta::connection;
 use embassy_executor::Spawner;
 use embassy_net::dns::DnsQueryType;
@@ -27,6 +24,8 @@ use hal::rng::Rng;
 use hal::{embassy, peripherals::Peripherals, prelude::*, timer::TimerGroup};
 use log::info;
 use static_cell::make_static;
+
+use mqtt_server::socket::listen;
 
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
@@ -110,4 +109,13 @@ async fn main(spawner: Spawner) -> ! {
 #[embassy_executor::task]
 async fn net_task(stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>) {
     stack.run().await
+}
+
+#[embassy_executor::task(pool_size = MAX_CONNECTIONS)]
+async fn listen_task(
+    stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
+    id: usize,
+    port: u16,
+) {
+    listen(stack, id, port).await
 }
