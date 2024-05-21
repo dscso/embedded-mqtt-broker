@@ -37,4 +37,7 @@ jobs:
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
       - name: Run command
+        env:
+          SSID: Foo
+          PASSWORD: Bar
         run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
