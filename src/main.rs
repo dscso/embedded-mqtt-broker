@@ -4,15 +4,11 @@
 
 mod sta;
 
-#[global_allocator]
-static ALLOCATOR: emballoc::Allocator<4096> = emballoc::Allocator::new();
-
-extern crate alloc;
-
 use crate::sta::connection;
+use core::str::FromStr;
 use embassy_executor::Spawner;
 use embassy_net::dns::DnsQueryType;
-use embassy_net::{Config, Stack, StackResources};
+use embassy_net::{Config, ConfigV6, Ipv6Address, Ipv6Cidr, Stack, StackResources, StaticConfigV6};
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
 use esp_hal as hal;
@@ -65,8 +61,19 @@ async fn main(spawner: Spawner) -> ! {
     let timer_group0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
     embassy::init(&clocks, timer_group0);
 
-    let config = Config::dhcpv4(Default::default());
+    let mut config = Config::dhcpv4(Default::default());
+    // might be removed if smoltcp gets slaac support
+    const IPV6_ADDR: Option<&str> = option_env!("IPV6");
+    if let Some(ipv6) = IPV6_ADDR {
+        let ip = Ipv6Address::from_str(ipv6)
+            .expect("ipv6 addr configured in IPV6 environment variable is invalid");
 
+        config.ipv6 = ConfigV6::Static(StaticConfigV6 {
+            address: Ipv6Cidr::new(ip, 64),
+            gateway: None,
+            dns_servers: Default::default(),
+        });
+    }
     // Init network stack
     let stack = &*make_static!(Stack::new(
         wifi_interface,
@@ -85,21 +92,24 @@ async fn main(spawner: Spawner) -> ! {
         Timer::after(Duration::from_millis(500)).await;
     }
 
-    println!("Waiting to get IP address...");
+    // spawn listeners for concurrent connections
+    for i in 0..MAX_CONNECTIONS {
+        spawner.spawn(listen_task(stack, i, 1883)).ok();
+    }
+
+    println!("Waiting to get IPv4 address...");
     loop {
         if let Some(config) = stack.config_v4() {
-            println!("Got IP: {}", config.address);
+            println!("Got IPv4: {}", config.address);
+            if let Some(config) = stack.config_v6() {
+                println!("Got IPv6: {}", config.address)
+            }
             break;
         }
         Timer::after(Duration::from_millis(500)).await;
     }
 
-    // spawn listeners for concurrent connections
-    for i in 0..MAX_CONNECTIONS {
-        spawner.spawn(listen_task(stack, i, 1883)).ok();
-    }
     loop {
-        //let res = Some(0);
         let res = stack.dns_query("google.de", DnsQueryType::A).await;
         info!("DNS query result: {:?}", res);
         Timer::after(Duration::from_secs(10)).await;

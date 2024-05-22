@@ -104,6 +104,14 @@ where
     }
 
     pub async fn write<'a>(&mut self, packet: MqttPacket<'a>) -> Result<(), ()> {
+        if packet.binary_size() > N as u32 {
+            error!(
+                "packet too large to write ({}/{} Bytes)",
+                packet.binary_size(),
+                N
+            );
+            return Err(());
+        }
         // create a packet writer with the same size as the parser
         let mut writer = PacketWriter::<N>::default();
         packet.write(&mut writer).map_err(|_| ())?;
