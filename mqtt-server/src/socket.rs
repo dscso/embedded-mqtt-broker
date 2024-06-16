@@ -1,5 +1,7 @@
 use crate::codec::MqttCodec;
 use core::num::NonZeroU16;
+use embassy_futures::select::Either::{First, Second};
+use embassy_futures::select::select;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_net_driver::Driver;
@@ -9,14 +11,18 @@ use mqtt_format::v5::packets::connack::{ConnackProperties, ConnackReasonCode, MC
 use mqtt_format::v5::packets::puback::{MPuback, PubackProperties, PubackReasonCode};
 use mqtt_format::v5::packets::suback::{MSuback, SubackProperties};
 use mqtt_format::v5::packets::MqttPacket;
+use mqtt_format::v5::packets::publish::PublishProperties;
+use mqtt_format::v5::qos::QualityOfService;
 use mqtt_format::v5::variable_header::PacketIdentifier;
+use crate::distributor::{Distributor, InnerDistributorMutex};
 
-pub async fn listen<T>(stack: &'static Stack<T>, id: usize, port: u16)
+pub async fn listen<T, const N: usize>(stack: &'static Stack<T>, id: usize, port: u16, distributor: &'static InnerDistributorMutex<N>)
 where
     T: Driver,
 {
     let mut rx_buffer = [0; 1600];
     let mut tx_buffer = [0; 1600];
+    let distributor = Distributor::new(distributor).await;
 
     loop {
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
@@ -55,15 +61,30 @@ where
         info!("connected");
 
         loop {
-            let packet = parser.next().await;
-            let packet = match packet {
-                Ok(Some(packet)) => packet,
-                Ok(None) => {
+            let either = select(parser.next(), distributor.subscribe(id)).await;
+            let packet = match either {
+                First(Ok(Some(packet))) => packet,
+                First(Ok(None)) => {
                     break;
                 }
-                Err(e) => {
+                First(Err(e)) => {
                     warn!("SOCKET {}: {:?}", id, e);
                     break;
+                }
+                Second(e) => {
+                    info!("SOCKET {}: received message from distributor", id);
+                    let payload = "hello world".as_bytes();
+                    let packet = MqttPacket::Publish(mqtt_format::v5::packets::publish::MPublish {
+                        duplicate: false,
+                        quality_of_service: QualityOfService::AtMostOnce,
+                        retain: false,
+                        topic_name: "/test/lol",
+                        packet_identifier: None,
+                        properties: PublishProperties::new(),
+                        payload: &payload,
+                    });
+                    parser.write(packet).await.unwrap();
+                    continue;
                 }
             };
 
@@ -74,6 +95,7 @@ where
                         publish.topic_name,
                         core::str::from_utf8(publish.payload).unwrap_or("<invalid utf8>")
                     );
+                    distributor.publish(id, publish.payload.len() as u8).await;
                     let pkg = MqttPacket::Puback(MPuback {
                         packet_identifier: publish
                             .packet_identifier

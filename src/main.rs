@@ -20,6 +20,7 @@ use hal::rng::Rng;
 use hal::{embassy, peripherals::Peripherals, prelude::*, timer::TimerGroup};
 use log::info;
 use static_cell::make_static;
+use mqtt_server::distributor::{InnerDistributor, InnerDistributorMutex};
 
 use mqtt_server::socket::listen;
 
@@ -91,10 +92,10 @@ async fn main(spawner: Spawner) -> ! {
         }
         Timer::after(Duration::from_millis(500)).await;
     }
-
+    let distributor = &*make_static!(InnerDistributorMutex::new(InnerDistributor::default()));
     // spawn listeners for concurrent connections
     for i in 0..MAX_CONNECTIONS {
-        spawner.spawn(listen_task(stack, i, 1883)).ok();
+        spawner.spawn(listen_task(stack, i, 1883, &distributor)).ok();
     }
 
     println!("Waiting to get IPv4 address...");
@@ -110,6 +111,9 @@ async fn main(spawner: Spawner) -> ! {
     }
 
     loop {
+        if let Some(config) = stack.config_v6() {
+            println!("Got IPv6: {}", config.address)
+        }
         let res = stack.dns_query("google.de", DnsQueryType::A).await;
         info!("DNS query result: {:?}", res);
         Timer::after(Duration::from_secs(10)).await;
@@ -126,6 +130,7 @@ async fn listen_task(
     stack: &'static Stack<WifiDevice<'static, WifiStaDevice>>,
     id: usize,
     port: u16,
+    distributor: &'static InnerDistributorMutex<MAX_CONNECTIONS>,
 ) {
-    listen(stack, id, port).await
+    listen(stack, id, port, distributor).await
 }

@@ -118,7 +118,8 @@ where
         self.stream
             .write(writer.get_written_data())
             .await
-            .map_err(|_| ())?;
+            .unwrap();
+            //.map_err(|_| ())?;
         Ok(())
     }
 }
