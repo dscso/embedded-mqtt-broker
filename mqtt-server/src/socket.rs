@@ -1,8 +1,9 @@
 use crate::codec::MqttCodec;
+use crate::distributor::{Distributor, InnerDistributorMutex};
 use core::num::NonZeroU16;
 use embassy_futures::join::{join, join_array};
-use embassy_futures::select::Either::{First, Second};
 use embassy_futures::select::select;
+use embassy_futures::select::Either::{First, Second};
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_net_driver::Driver;
@@ -10,18 +11,21 @@ use embassy_time::Duration;
 use heapless::Vec;
 use log::{info, warn};
 use mqtt_format::v5::packets::connack::{ConnackProperties, ConnackReasonCode, MConnack};
+use mqtt_format::v5::packets::pingresp::MPingresp;
 use mqtt_format::v5::packets::puback::{MPuback, PubackProperties, PubackReasonCode};
+use mqtt_format::v5::packets::publish::PublishProperties;
 use mqtt_format::v5::packets::suback::{MSuback, SubackProperties};
 use mqtt_format::v5::packets::MqttPacket;
 use mqtt_format::v5::packets::MqttPacketKind::Pingresp;
-use mqtt_format::v5::packets::pingresp::MPingresp;
-use mqtt_format::v5::packets::publish::PublishProperties;
 use mqtt_format::v5::qos::QualityOfService;
 use mqtt_format::v5::variable_header::PacketIdentifier;
-use crate::distributor::{Distributor, InnerDistributorMutex};
 
-pub async fn listen<T, const N: usize>(stack: &'static Stack<T>, id: usize, port: u16, distributor: &'static InnerDistributorMutex<N>)
-where
+pub async fn listen<T, const N: usize>(
+    stack: &'static Stack<T>,
+    id: usize,
+    port: u16,
+    distributor: &'static InnerDistributorMutex<N>,
+) where
     T: Driver,
 {
     let mut rx_buffer = [0; 1600];
@@ -92,7 +96,7 @@ where
                     continue;
                 }
             };
-            // react on actual packets received by the socket 
+            // react on actual packets received by the socket
             match packet {
                 MqttPacket::Publish(publish) => {
                     info!(
@@ -100,7 +104,9 @@ where
                         publish.topic_name,
                         core::str::from_utf8(publish.payload).unwrap_or("<invalid utf8>")
                     );
-                    distributor.publish(publish.topic_name, publish.payload).await;
+                    distributor
+                        .publish(publish.topic_name, publish.payload)
+                        .await;
                     let pkg = MqttPacket::Puback(MPuback {
                         packet_identifier: publish
                             .packet_identifier

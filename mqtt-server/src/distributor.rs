@@ -1,15 +1,13 @@
-use core::future::{Future, poll_fn};
+use crate::topics::Tree;
+use core::future::{poll_fn, Future};
 use core::task::{Context, Poll, Waker};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
 use heapless::{Deque, Vec};
-use mqtt_format::v5::packets::subscribe::Subscriptions;
-use crate::topics::Tree;
 
 pub type Msg = Vec<u8, 64>;
 pub type InnerDistributorMutex<const N: usize> = Mutex<NoopRawMutex, InnerDistributor<N>>;
 const QUEUE_LEN: usize = 4;
-
 
 pub struct InnerDistributor<const N: usize> {
     queue: Deque<(Msg, usize), QUEUE_LEN>,
@@ -60,10 +58,7 @@ pub struct Distributor<const N: usize> {
 
 impl<'a, const N: usize> Distributor<N> {
     pub async fn new(inner: &'static InnerDistributorMutex<N>, id: usize) -> Self {
-        Self {
-            id,
-            inner
-        }
+        Self { id, inner }
     }
     pub async fn publish(&self, topic: &str, msg: &[u8]) {
         self.inner.lock().await.publish(topic, msg);
@@ -78,9 +73,7 @@ impl<'a, const N: usize> Distributor<N> {
         self.inner.lock().await.unsubscribe(subscription, self.id);
     }
     pub fn next(&self) -> impl Future<Output = Msg> + '_ {
-        poll_fn(move |cx| {
-            self.poll_at(cx, self.id)
-        })
+        poll_fn(move |cx| self.poll_at(cx, self.id))
     }
 
     fn poll_at(&self, _cx: &mut Context, id: usize) -> Poll<Msg> {

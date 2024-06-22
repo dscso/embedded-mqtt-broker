@@ -115,11 +115,8 @@ where
         // create a packet writer with the same size as the parser
         let mut writer = PacketWriter::<N>::default();
         packet.write(&mut writer).map_err(|_| ())?;
-        self.stream
-            .write(writer.get_written_data())
-            .await
-            .unwrap();
-            //.map_err(|_| ())?;
+        self.stream.write(writer.get_written_data()).await.unwrap();
+        //.map_err(|_| ())?;
         Ok(())
     }
 }
