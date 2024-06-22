@@ -32,7 +32,7 @@ where
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(10)));
         socket.set_keep_alive(Some(Duration::from_secs(1)));
-
+        distributor.unsubscibe_all_topics().await;
         info!("SOCKET {}: Listening on TCP:{}...", id, port);
         if let Err(e) = socket.accept(port).await {
             warn!("accept error: {:?}", e);

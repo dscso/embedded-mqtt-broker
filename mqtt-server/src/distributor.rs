@@ -45,6 +45,12 @@ impl<const N: usize> InnerDistributor<N> {
     fn subscribe(&mut self, subscription: &str, id: usize) {
         self.tree.insert(subscription, id);
     }
+    fn unsubscribe(&mut self, subscription: &str, id: usize) {
+        self.tree.remove(subscription, id);
+    }
+    fn unsubscribe_all_topics(&mut self, id: usize) {
+        self.tree.remove_all_subscriptions(id);
+    }
 }
 
 pub struct Distributor<const N: usize> {
@@ -64,6 +70,12 @@ impl<'a, const N: usize> Distributor<N> {
     }
     pub async fn subscribe(&self, subscription: &str) {
         self.inner.lock().await.subscribe(subscription, self.id);
+    }
+    pub async fn unsubscibe_all_topics(&self) {
+        self.inner.lock().await.unsubscribe_all_topics(self.id);
+    }
+    pub async fn unsubscribe(&self, subscription: &str) {
+        self.inner.lock().await.unsubscribe(subscription, self.id);
     }
     pub fn next(&self) -> impl Future<Output = Msg> + '_ {
         poll_fn(move |cx| {
