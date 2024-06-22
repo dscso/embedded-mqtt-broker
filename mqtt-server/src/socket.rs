@@ -1,16 +1,20 @@
 use crate::codec::MqttCodec;
 use core::num::NonZeroU16;
+use embassy_futures::join::{join, join_array};
 use embassy_futures::select::Either::{First, Second};
 use embassy_futures::select::select;
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_net_driver::Driver;
 use embassy_time::Duration;
+use heapless::Vec;
 use log::{info, warn};
 use mqtt_format::v5::packets::connack::{ConnackProperties, ConnackReasonCode, MConnack};
 use mqtt_format::v5::packets::puback::{MPuback, PubackProperties, PubackReasonCode};
 use mqtt_format::v5::packets::suback::{MSuback, SubackProperties};
 use mqtt_format::v5::packets::MqttPacket;
+use mqtt_format::v5::packets::MqttPacketKind::Pingresp;
+use mqtt_format::v5::packets::pingresp::MPingresp;
 use mqtt_format::v5::packets::publish::PublishProperties;
 use mqtt_format::v5::qos::QualityOfService;
 use mqtt_format::v5::variable_header::PacketIdentifier;
@@ -22,7 +26,7 @@ where
 {
     let mut rx_buffer = [0; 1600];
     let mut tx_buffer = [0; 1600];
-    let distributor = Distributor::new(distributor).await;
+    let distributor = Distributor::new(distributor, id).await;
 
     loop {
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
@@ -61,19 +65,20 @@ where
         info!("connected");
 
         loop {
-            let either = select(parser.next(), distributor.subscribe(id)).await;
+            let either = select(parser.next(), distributor.next()).await;
             let packet = match either {
                 First(Ok(Some(packet))) => packet,
                 First(Ok(None)) => {
+                    // socket closed
                     break;
                 }
                 First(Err(e)) => {
+                    // socket error, like connection reset by peer
                     warn!("SOCKET {}: {:?}", id, e);
                     break;
                 }
-                Second(e) => {
+                Second(msg) => {
                     info!("SOCKET {}: received message from distributor", id);
-                    let payload = "hello world".as_bytes();
                     let packet = MqttPacket::Publish(mqtt_format::v5::packets::publish::MPublish {
                         duplicate: false,
                         quality_of_service: QualityOfService::AtMostOnce,
@@ -81,13 +86,13 @@ where
                         topic_name: "/test/lol",
                         packet_identifier: None,
                         properties: PublishProperties::new(),
-                        payload: &payload,
+                        payload: &msg,
                     });
                     parser.write(packet).await.unwrap();
                     continue;
                 }
             };
-
+            // react on actual packets received by the socket 
             match packet {
                 MqttPacket::Publish(publish) => {
                     info!(
@@ -95,7 +100,7 @@ where
                         publish.topic_name,
                         core::str::from_utf8(publish.payload).unwrap_or("<invalid utf8>")
                     );
-                    distributor.publish(id, publish.payload.len() as u8).await;
+                    distributor.publish(publish.topic_name, publish.payload).await;
                     let pkg = MqttPacket::Puback(MPuback {
                         packet_identifier: publish
                             .packet_identifier
@@ -106,7 +111,10 @@ where
                     parser.write(pkg).await.unwrap();
                 }
                 MqttPacket::Subscribe(subscribe) => {
-                    info!("subscribe: {:?}", subscribe);
+                    for s in subscribe.subscriptions.iter() {
+                        info!("subscribing to: {}", s.topic_filter);
+                        distributor.subscribe(s.topic_filter).await;
+                    }
                     let pkg = MqttPacket::Suback(MSuback {
                         packet_identifier: subscribe.packet_identifier,
                         properties: SubackProperties::new(),
@@ -117,6 +125,10 @@ where
                 MqttPacket::Disconnect(disconnect) => {
                     info!("disconnect: {:?}", disconnect);
                     break;
+                }
+                MqttPacket::Pingreq(_pingreq) => {
+                    let pkg = MqttPacket::Pingresp(MPingresp {});
+                    parser.write(pkg).await.unwrap();
                 }
                 pkg => {
                     warn!("SOCKET: unexpected packet {:?}", pkg);

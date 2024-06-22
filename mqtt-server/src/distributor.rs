@@ -1,26 +1,19 @@
-use core::future::poll_fn;
+use core::future::{Future, poll_fn};
 use core::task::{Context, Poll, Waker};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_sync::mutex::Mutex;
-use embassy_sync::signal::Signal;
-use log::{info, warn};
-use crate::distributor::SomeCommand::On;
+use heapless::{Deque, Vec};
+use mqtt_format::v5::packets::subscribe::Subscriptions;
+use crate::topics::Tree;
 
-pub type Msg = u8;
-const MAX_MSG_CHANNEL: usize = 1;
-type DistributorChannel = Channel<NoopRawMutex, Msg, MAX_MSG_CHANNEL>;
-type DistributorReceiver<'a> = Receiver<'a, NoopRawMutex, Msg, MAX_MSG_CHANNEL>;
+pub type Msg = Vec<u8, 64>;
 pub type InnerDistributorMutex<const N: usize> = Mutex<NoopRawMutex, InnerDistributor<N>>;
-enum SomeCommand {
-    On,
-    Off,
-}
-
-type DistributorSignal = Signal<NoopRawMutex, SomeCommand>;
+const QUEUE_LEN: usize = 4;
 
 
 pub struct InnerDistributor<const N: usize> {
+    queue: Deque<(Msg, usize), QUEUE_LEN>,
+    tree: Tree<N>,
     indices: [usize; N],
     wakers: [Option<Waker>; N],
 }
@@ -29,45 +22,56 @@ impl<const N: usize> Default for InnerDistributor<N> {
     fn default() -> Self {
         const NONE_WAKER: Option<Waker> = None;
         Self {
+            queue: Default::default(),
+            tree: Tree::new(),
             indices: [0; N],
             wakers: [NONE_WAKER; N],
         }
     }
 }
 impl<const N: usize> InnerDistributor<N> {
-    fn publish(&mut self, id: usize, msg: Msg) {
-        for i in 0..N {
-            if i == id { continue; }
-            self.indices[i] += 1;
-            self.wakers[i].as_ref().map(|w| w.wake_by_ref());
+    fn publish(&mut self, topic: &str, msg: &[u8]) {
+        let vec = Vec::from_slice(msg).unwrap(); // todo correct error handling
+        let subscribers = self.tree.get_subscribed(topic);
+        if subscribers.is_empty() {
+            return;
         }
+        self.queue.push_back((vec, subscribers.len())).unwrap(); // todo correct error handling
+        for i in subscribers.iter() {
+            self.indices[*i] += 1;
+            self.wakers[*i].as_ref().map(|w| w.wake_by_ref());
+        }
+    }
+    fn subscribe(&mut self, subscription: &str, id: usize) {
+        self.tree.insert(subscription, id);
     }
 }
 
 pub struct Distributor<const N: usize> {
-    //receiver: DistributorReceiver<'a>,
+    id: usize,
     inner: &'static InnerDistributorMutex<N>,
 }
 
 impl<'a, const N: usize> Distributor<N> {
-    pub async fn new(inner: &'static InnerDistributorMutex<N>) -> Self {
+    pub async fn new(inner: &'static InnerDistributorMutex<N>, id: usize) -> Self {
         Self {
+            id,
             inner
         }
     }
-    pub async fn publish(&self, id: usize, msg: Msg) {
-        self.inner.lock().await.publish(id, msg);
+    pub async fn publish(&self, topic: &str, msg: &[u8]) {
+        self.inner.lock().await.publish(topic, msg);
     }
-    pub async fn subscribe(&self, id: usize) -> Msg {
-        let ret  = poll_fn(move |cx| {
-            self.poll_at(cx, id)
-        }).await;
-        warn!("subscribe!!! {}", ret);
-        ret
+    pub async fn subscribe(&self, subscription: &str) {
+        self.inner.lock().await.subscribe(subscription, self.id);
+    }
+    pub fn next(&self) -> impl Future<Output = Msg> + '_ {
+        poll_fn(move |cx| {
+            self.poll_at(cx, self.id)
+        })
     }
 
     fn poll_at(&self, _cx: &mut Context, id: usize) -> Poll<Msg> {
-        info!("poll {id}");
         // todo maybe needs to be changed? Does the task wake up again?
         let mut inner = match self.inner.try_lock() {
             Ok(inner) => inner,
@@ -79,7 +83,13 @@ impl<'a, const N: usize> Distributor<N> {
             inner.indices[id] -= 1;
             // might do an optimization here to avoid cloning waker every poll
             inner.wakers[id] = None;
-            Poll::Ready(42)
+            let item = inner.queue.iter_mut().last().unwrap();
+            item.1 -= 1;
+            if item.1 == 0 {
+                Poll::Ready(inner.queue.pop_back().unwrap().0)
+            } else {
+                Poll::Ready(item.0.clone())
+            }
         } else {
             if inner.wakers[id].is_none() {
                 inner.wakers[id] = Some(_cx.waker().clone());
