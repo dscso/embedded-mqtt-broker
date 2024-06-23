@@ -1,5 +1,5 @@
 #![no_std]
-#![feature(generic_const_exprs)]
+//#![feature(generic_const_exprs)]
 
 pub mod codec;
 pub mod distributor;

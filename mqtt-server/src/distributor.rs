@@ -65,7 +65,9 @@ impl<const N: usize> InnerDistributor<N> {
         self.queue.push_back(msg).unwrap(); // todo correct error handling
         for i in subscribers.iter() {
             self.indices[*i] += 1;
-            self.wakers[*i].as_ref().map(|w| w.wake_by_ref());
+            if let Some(w) = self.wakers[*i].as_ref() {
+                w.wake_by_ref()
+            }
         }
     }
     fn subscribe(&mut self, subscription: &str, id: usize) {
@@ -110,7 +112,7 @@ impl<'a, const N: usize> Distributor<N> {
             Ok(inner) => inner,
             Err(_e) => {
                 panic!("In single core system mutex can not be already locked");
-                return Poll::Pending;
+                //return Poll::Pending;
             }
         };
         if inner.indices[id] > 0 {
