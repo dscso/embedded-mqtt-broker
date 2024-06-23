@@ -1,14 +1,29 @@
 use core::usize;
 use heapless::{FnvIndexSet, String, Vec};
+use crate::bitset::BitSet;
 
 const MAX_DEPTH: usize = 16;
+
+// cant use const generics because https://blog.rust-lang.org/inside-rust/2021/09/06/Splitting-const-generics.html#featuregeneric_const_exprs
 #[derive(Debug, Default)]
 struct Node<const N: usize> {
     name: String<64>,
-    subscribers: FnvIndexSet<usize, N>,
+    subscribers: BitSet<64>, // max amount of subscribers
     parent: Option<usize>,
-    children: Vec<usize, N>,
+    children: BitSet<64>, // max amount of nodes
 }
+
+impl<const N: usize> Node<N> {
+    fn new(name: &str, parent: Option<usize>) -> Self {
+        Self {
+            name: String::try_from(name).unwrap(),
+            subscribers: BitSet::default(),
+            parent,
+            children: BitSet::default(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Tree<const N: usize> {
     nodes: Vec<Option<Node<N>>, N>,
@@ -17,12 +32,7 @@ pub struct Tree<const N: usize> {
 impl<const N: usize> Tree<N> {
     pub fn new() -> Self {
         let mut nodes = Vec::new();
-        let root = Node {
-            name: String::try_from("").unwrap(),
-            subscribers: FnvIndexSet::new(),
-            parent: None,
-            children: Vec::new(),
-        };
+        let root = Node::new("", None);
         nodes.push(Some(root)).unwrap();
         for _ in 1..N {
             nodes
@@ -32,12 +42,7 @@ impl<const N: usize> Tree<N> {
         Self { nodes }
     }
     fn insert_node(&mut self, val: &str, parent: Option<usize>) -> Option<usize> {
-        let node = Node {
-            name: String::try_from(val).unwrap(),
-            subscribers: FnvIndexSet::new(),
-            parent,
-            children: Vec::new(),
-        };
+        let node = Node::new(val, parent);
         // find first free slot
         let mut id = None;
         for (i, n) in self.nodes.iter_mut().enumerate() {
@@ -48,14 +53,9 @@ impl<const N: usize> Tree<N> {
             }
         }
         if let Some(parent) = parent {
-            self.nodes
-                .get_mut(parent)
-                .unwrap()
-                .as_mut()
-                .unwrap()
+            self.get_mut_node(parent)
                 .children
-                .push(id.unwrap())
-                .unwrap();
+                .set(id.unwrap());
         }
         id
     }
@@ -72,14 +72,10 @@ impl<const N: usize> Tree<N> {
                 parent = child_id.unwrap();
             }
         }
-        self.nodes
-            .get_mut(parent)
-            .unwrap()
-            .as_mut()
-            .unwrap()
+        self.get_mut_node(parent)
             .subscribers
-            .insert(subscription)
-            .unwrap();
+            .set(subscription);
+
     }
     pub fn get_ancestors(&self, topic: &str) -> Vec<usize, MAX_DEPTH> {
         let mut node = 0; // root
@@ -107,12 +103,7 @@ impl<const N: usize> Tree<N> {
             // if not root
             if let Some(parent) = node.parent {
                 let parent_node = self.get_mut_node(parent);
-                parent_node.children = parent_node
-                    .children
-                    .iter()
-                    .filter(|c| **c != node_id)
-                    .copied()
-                    .collect();
+                parent_node.children.unset(node_id);
                 // recursion
                 *self.nodes.get_mut(node_id).unwrap() = None;
                 self.remove_if_not_needed(parent);
@@ -127,7 +118,7 @@ impl<const N: usize> Tree<N> {
 
         if let Some(last) = ancestors.iter().last() {
             let subscribers = self.get_mut_node(*last);
-            subscribers.subscribers.remove(&subscription);
+            subscribers.subscribers.unset(subscription);
             self.remove_if_not_needed(*last);
         }
     }
@@ -135,7 +126,7 @@ impl<const N: usize> Tree<N> {
         for i in 1..N {
             if let Some(node) = self.nodes.get_mut(i).as_mut() {
                 if let Some(node) = node {
-                    node.subscribers.remove(&id);
+                    node.subscribers.unset(id);
                     self.remove_if_not_needed(i);
                 }
             }
@@ -143,16 +134,16 @@ impl<const N: usize> Tree<N> {
     }
     fn get_child_id(&self, parent: usize, name: &str) -> Option<usize> {
         let parent = self.nodes[parent].as_ref()?;
-        for child_id in parent.children.iter() {
-            let child = self.nodes[*child_id].as_ref()?;
+        for child_id in parent.children.iter_ones() {
+            let child = self.nodes[child_id].as_ref()?;
             if child.name == name {
-                return Some(*child_id);
+                return Some(child_id);
             }
         }
         return None;
     }
-    fn get_node(&self, id: usize) -> Option<&Node<N>> {
-        self.nodes[id].as_ref()
+    fn get_node(&self, id: usize) -> &Node<N> {
+        self.nodes[id].as_ref().unwrap()
     }
     pub fn get_subscribed(&self, topic: &str) -> FnvIndexSet<usize, N> {
         let mut parent = 0; // root
@@ -164,11 +155,10 @@ impl<const N: usize> Tree<N> {
             if let Some(child_id) = self.get_child_id(parent, name) {
                 parent = child_id;
                 self.get_node(parent)
-                    .unwrap()
                     .subscribers
-                    .iter()
+                    .iter_ones()
                     .for_each(|s| {
-                        subscribers.insert(*s).unwrap();
+                        subscribers.insert(s).unwrap();
                     });
             } else {
                 // return no subscribers if no child found

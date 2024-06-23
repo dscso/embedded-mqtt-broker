@@ -6,3 +6,4 @@ pub mod codec;
 pub mod distributor;
 pub mod socket;
 mod topics;
+mod bitset;

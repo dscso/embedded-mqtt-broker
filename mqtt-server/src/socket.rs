@@ -1,14 +1,12 @@
 use crate::codec::MqttCodec;
 use crate::distributor::{Distributor, InnerDistributorMutex};
 use core::num::NonZeroU16;
-use embassy_futures::join::{join, join_array};
 use embassy_futures::select::select;
 use embassy_futures::select::Either::{First, Second};
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_net_driver::Driver;
 use embassy_time::Duration;
-use heapless::Vec;
 use log::{info, warn};
 use mqtt_format::v5::packets::connack::{ConnackProperties, ConnackReasonCode, MConnack};
 use mqtt_format::v5::packets::pingresp::MPingresp;

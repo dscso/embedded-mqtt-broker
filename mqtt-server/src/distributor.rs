@@ -8,10 +8,11 @@ use heapless::{Deque, Vec};
 pub type Msg = Vec<u8, 64>;
 pub type InnerDistributorMutex<const N: usize> = Mutex<NoopRawMutex, InnerDistributor<N>>;
 const QUEUE_LEN: usize = 4;
+const TREE_SIZE: usize = 32;
 
 pub struct InnerDistributor<const N: usize> {
     queue: Deque<(Msg, usize), QUEUE_LEN>,
-    tree: Tree<N>,
+    tree: Tree<TREE_SIZE>,
     indices: [usize; N],
     wakers: [Option<Waker>; N],
 }
