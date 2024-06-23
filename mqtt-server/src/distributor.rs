@@ -1,18 +1,37 @@
-use crate::topics::Tree;
+use crate::topics_list::TopicsList;
 use core::future::{poll_fn, Future};
 use core::task::{Context, Poll, Waker};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::Mutex;
-use heapless::{Deque, Vec};
+use heapless::{Deque, String, Vec};
 
 pub type Msg = Vec<u8, 64>;
+pub type Topic = String<64>;
 pub type InnerDistributorMutex<const N: usize> = Mutex<NoopRawMutex, InnerDistributor<N>>;
-const QUEUE_LEN: usize = 4;
-const TREE_SIZE: usize = 32;
+const QUEUE_LEN: usize = 2;
+const TREE_SIZE: usize = 64;
+#[derive(Debug)]
+pub struct MessageInQueue {
+    message: Message,
+    subscribers: usize,
+}
+#[derive(Debug, Clone)]
+pub struct Message {
+    topic: String<64>,
+    msg: Vec<u8, 64>,
+}
 
+impl Message {
+    pub fn topic(&self) -> &str {
+        self.topic.as_str()
+    }
+    pub fn message(&self) -> &[u8] {
+        self.msg.as_slice()
+    }
+}
 pub struct InnerDistributor<const N: usize> {
-    queue: Deque<(Msg, usize), QUEUE_LEN>,
-    tree: Tree<TREE_SIZE>,
+    queue: Deque<MessageInQueue, QUEUE_LEN>,
+    tree: TopicsList<TREE_SIZE, N>,
     indices: [usize; N],
     wakers: [Option<Waker>; N],
 }
@@ -22,7 +41,7 @@ impl<const N: usize> Default for InnerDistributor<N> {
         const NONE_WAKER: Option<Waker> = None;
         Self {
             queue: Default::default(),
-            tree: Tree::new(),
+            tree: Default::default(),
             indices: [0; N],
             wakers: [NONE_WAKER; N],
         }
@@ -35,7 +54,15 @@ impl<const N: usize> InnerDistributor<N> {
         if subscribers.is_empty() {
             return;
         }
-        self.queue.push_back((vec, subscribers.len())).unwrap(); // todo correct error handling
+        let msg = Message {
+            topic: String::try_from(topic).unwrap(), // todo correct error handling
+            msg: vec,
+        };
+        let msg = MessageInQueue {
+            message: msg,
+            subscribers: subscribers.len(),
+        };
+        self.queue.push_back(msg).unwrap(); // todo correct error handling
         for i in subscribers.iter() {
             self.indices[*i] += 1;
             self.wakers[*i].as_ref().map(|w| w.wake_by_ref());
@@ -73,15 +100,16 @@ impl<'a, const N: usize> Distributor<N> {
     pub async fn unsubscribe(&self, subscription: &str) {
         self.inner.lock().await.unsubscribe(subscription, self.id);
     }
-    pub fn next(&self) -> impl Future<Output = Msg> + '_ {
+    pub fn next(&self) -> impl Future<Output = Message> + '_ {
         poll_fn(move |cx| self.poll_at(cx, self.id))
     }
 
-    fn poll_at(&self, _cx: &mut Context, id: usize) -> Poll<Msg> {
+    fn poll_at(&self, _cx: &mut Context, id: usize) -> Poll<Message> {
         // todo maybe needs to be changed? Does the task wake up again?
         let mut inner = match self.inner.try_lock() {
             Ok(inner) => inner,
             Err(_e) => {
+                panic!("In single core system mutex can not be already locked");
                 return Poll::Pending;
             }
         };
@@ -90,11 +118,11 @@ impl<'a, const N: usize> Distributor<N> {
             // might do an optimization here to avoid cloning waker every poll
             inner.wakers[id] = None;
             let item = inner.queue.iter_mut().last().unwrap();
-            item.1 -= 1;
-            if item.1 == 0 {
-                Poll::Ready(inner.queue.pop_back().unwrap().0)
+            item.subscribers -= 1;
+            if item.subscribers == 0 {
+                Poll::Ready(inner.queue.pop_back().unwrap().message)
             } else {
-                Poll::Ready(item.0.clone())
+                Poll::Ready(item.message.clone())
             }
         } else {
             if inner.wakers[id].is_none() {

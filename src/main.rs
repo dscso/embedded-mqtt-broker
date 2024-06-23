@@ -19,14 +19,14 @@ use hal::clock::ClockControl;
 use hal::rng::Rng;
 use hal::{embassy, peripherals::Peripherals, prelude::*, timer::TimerGroup};
 use log::info;
-use static_cell::make_static;
 use mqtt_server::distributor::{InnerDistributor, InnerDistributorMutex};
+use static_cell::make_static;
 
 use mqtt_server::socket::listen;
 
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
-const MAX_CONNECTIONS: usize = 4;
+const MAX_CONNECTIONS: usize = 16;
 
 #[main]
 async fn main(spawner: Spawner) -> ! {
@@ -95,7 +95,9 @@ async fn main(spawner: Spawner) -> ! {
     let distributor = &*make_static!(InnerDistributorMutex::new(InnerDistributor::default()));
     // spawn listeners for concurrent connections
     for i in 0..MAX_CONNECTIONS {
-        spawner.spawn(listen_task(stack, i, 1883, &distributor)).ok();
+        spawner
+            .spawn(listen_task(stack, i, 1883, &distributor))
+            .ok();
     }
 
     println!("Waiting to get IPv4 address...");
@@ -116,7 +118,7 @@ async fn main(spawner: Spawner) -> ! {
         }
         let res = stack.dns_query("google.de", DnsQueryType::A).await;
         info!("DNS query result: {:?}", res);
-        Timer::after(Duration::from_secs(10)).await;
+        Timer::after(Duration::from_secs(30)).await;
     }
 }
 

@@ -7,14 +7,13 @@ use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_net_driver::Driver;
 use embassy_time::Duration;
-use log::{info, warn};
+use log::{debug, info, warn};
 use mqtt_format::v5::packets::connack::{ConnackProperties, ConnackReasonCode, MConnack};
 use mqtt_format::v5::packets::pingresp::MPingresp;
 use mqtt_format::v5::packets::puback::{MPuback, PubackProperties, PubackReasonCode};
-use mqtt_format::v5::packets::publish::PublishProperties;
+use mqtt_format::v5::packets::publish::{MPublish, PublishProperties};
 use mqtt_format::v5::packets::suback::{MSuback, SubackProperties};
 use mqtt_format::v5::packets::MqttPacket;
-use mqtt_format::v5::packets::MqttPacketKind::Pingresp;
 use mqtt_format::v5::qos::QualityOfService;
 use mqtt_format::v5::variable_header::PacketIdentifier;
 
@@ -31,25 +30,26 @@ pub async fn listen<T, const N: usize>(
     let distributor = Distributor::new(distributor, id).await;
 
     loop {
+        // after previous connection is closed, unsubscribe from all topics
+        distributor.unsubscibe_all_topics().await;
+
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(10)));
         socket.set_keep_alive(Some(Duration::from_secs(1)));
-        distributor.unsubscibe_all_topics().await;
         info!("SOCKET {}: Listening on TCP:{}...", id, port);
         if let Err(e) = socket.accept(port).await {
             warn!("accept error: {:?}", e);
             continue;
         }
         info!(
-            "SOCKET {}: Received connection from {:?}",
+            "SOCKET {}: Received connection from {}",
             id,
-            socket.remote_endpoint()
+            socket.remote_endpoint().unwrap()
         );
         // connection handler
         let mut parser = MqttCodec::<TcpSocket, 1024>::new(socket);
         match parser.next().await {
             Ok(Some(MqttPacket::Connect(_connect))) => {
-                info!("decoded packet connect packet, sending ack...");
                 let pkg = MqttPacket::Connack(MConnack {
                     session_present: false,
                     reason_code: ConnackReasonCode::Success,
@@ -63,8 +63,6 @@ pub async fn listen<T, const N: usize>(
                 continue;
             }
         }
-
-        info!("connected");
 
         loop {
             let either = select(parser.next(), distributor.next()).await;
@@ -80,15 +78,14 @@ pub async fn listen<T, const N: usize>(
                     break;
                 }
                 Second(msg) => {
-                    info!("SOCKET {}: received message from distributor", id);
-                    let packet = MqttPacket::Publish(mqtt_format::v5::packets::publish::MPublish {
+                    let packet = MqttPacket::Publish(MPublish {
                         duplicate: false,
                         quality_of_service: QualityOfService::AtMostOnce,
                         retain: false,
-                        topic_name: "/test/lol",
+                        topic_name: msg.topic(),
                         packet_identifier: None,
                         properties: PublishProperties::new(),
-                        payload: &msg,
+                        payload: msg.message(),
                     });
                     parser.write(packet).await.unwrap();
                     continue;
@@ -97,11 +94,6 @@ pub async fn listen<T, const N: usize>(
             // react on actual packets received by the socket
             match packet {
                 MqttPacket::Publish(publish) => {
-                    info!(
-                        "publish: {} the following data: {}",
-                        publish.topic_name,
-                        core::str::from_utf8(publish.payload).unwrap_or("<invalid utf8>")
-                    );
                     distributor
                         .publish(publish.topic_name, publish.payload)
                         .await;
@@ -116,7 +108,7 @@ pub async fn listen<T, const N: usize>(
                 }
                 MqttPacket::Subscribe(subscribe) => {
                     for s in subscribe.subscriptions.iter() {
-                        info!("subscribing to: {}", s.topic_filter);
+                        debug!("subscribing to: {}", s.topic_filter);
                         distributor.subscribe(s.topic_filter).await;
                     }
                     let pkg = MqttPacket::Suback(MSuback {
@@ -126,8 +118,8 @@ pub async fn listen<T, const N: usize>(
                     });
                     parser.write(pkg).await.unwrap();
                 }
-                MqttPacket::Disconnect(disconnect) => {
-                    info!("disconnect: {:?}", disconnect);
+                MqttPacket::Disconnect(_disconnect) => {
+                    info!("SOCKET {}: disconnecting", id);
                     break;
                 }
                 MqttPacket::Pingreq(_pingreq) => {
