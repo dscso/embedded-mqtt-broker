@@ -11,13 +11,13 @@ use embassy_net::dns::DnsQueryType;
 use embassy_net::{Config, ConfigV6, Ipv6Address, Ipv6Cidr, Stack, StackResources, StaticConfigV6};
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
-use esp_hal as hal;
+use esp_hal::timer::timg::TimerGroup;
+use esp_hal::{
+    clock::ClockControl, peripherals::Peripherals, prelude::*, rng::Rng, system::SystemControl,
+};
 use esp_println::println;
-use esp_wifi::wifi::{WifiDevice, WifiStaDevice};
-use esp_wifi::{initialize, EspWifiInitFor};
-use hal::clock::ClockControl;
-use hal::rng::Rng;
-use hal::{embassy, peripherals::Peripherals, prelude::*, timer::TimerGroup};
+use esp_wifi::wifi::WifiDevice;
+use esp_wifi::{initialize, wifi::WifiStaDevice, EspWifiInitFor};
 use log::info;
 use mqtt_server::distributor::{InnerDistributor, InnerDistributorMutex};
 use static_cell::make_static;
@@ -34,8 +34,9 @@ async fn main(spawner: Spawner) -> ! {
 
     let peripherals = Peripherals::take();
 
-    let system = peripherals.SYSTEM.split();
+    let system = SystemControl::new(peripherals.SYSTEM);
     let clocks = ClockControl::max(system.clock_control).freeze();
+
     let mut rng = Rng::new(peripherals.RNG);
 
     let (seed_hi, seed_lo) = (rng.random(), rng.random());
@@ -43,14 +44,14 @@ async fn main(spawner: Spawner) -> ! {
     info!("Seed: {:x}", seed);
 
     #[cfg(target_arch = "xtensa")]
-    let timer = hal::timer::TimerGroup::new(peripherals.TIMG1, &clocks, None).timer0;
+    let timer = esp_hal::timer::timg::TimerGroup::new(peripherals.TIMG1, &clocks, None).timer0;
     #[cfg(target_arch = "riscv32")]
-    let timer = hal::systimer::SystemTimer::new(peripherals.SYSTIMER).alarm0;
+    let timer = esp_hal::timer::systimer::SystemTimer::new(peripherals.SYSTIMER).alarm0;
     let init = initialize(
         EspWifiInitFor::Wifi,
         timer,
         rng,
-        system.radio_clock_control,
+        peripherals.RADIO_CLK,
         &clocks,
     )
     .unwrap();
@@ -60,7 +61,7 @@ async fn main(spawner: Spawner) -> ! {
         esp_wifi::wifi::new_with_mode(&init, wifi, WifiStaDevice).unwrap();
 
     let timer_group0 = TimerGroup::new_async(peripherals.TIMG0, &clocks);
-    embassy::init(&clocks, timer_group0);
+    esp_hal_embassy::init(&clocks, timer_group0);
 
     let mut config = Config::dhcpv4(Default::default());
     // might be removed if smoltcp gets slaac support
@@ -77,6 +78,7 @@ async fn main(spawner: Spawner) -> ! {
     } else {
         //config.ipv6 = ConfigV6::Slaac;
     }
+
     // Init network stack
     let stack = &*make_static!(Stack::new(
         wifi_interface,
@@ -116,8 +118,9 @@ async fn main(spawner: Spawner) -> ! {
         if let Some(config) = stack.config_v6() {
             println!("Got IPv6: {}", config.address)
         }
-        let res = stack.dns_query("google.de", DnsQueryType::A).await;
-        println!("DNS query result: {:?}", res);
+        //let res = stack.dns_query("google.de", DnsQueryType::A).await;
+        //println!("DNS query result: {:?}", res);
+        println!("🐶");
         Timer::after(Duration::from_secs(1)).await;
     }
 }

@@ -12,7 +12,7 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 log = "0.4.22"
 embassy-time = { version = "0.3.0" }
-embassy-sync = "0.5.0"
+embassy-sync = "0.6.0"
 embedded-hal-async = { version = "1.0.0" }
 embedded-io-async = { version = "0.6.0" }
 embassy-futures = { version = "0.1.0" }
@@ -39,19 +39,24 @@ esp-backtrace = { version = "0.12.1", features = [
     "panic-handler",
     "println",
 ] }
-esp-hal = { version = "0.17.0", features = [
+esp-hal = { version = "0.18.0", features = [
     "esp32",
-    "embassy",
-    "embassy-executor",
-    "embassy-time-timg0",
-    "embassy-executor-thread",
-    "embassy-executor-interrupt"
+    #"embassy",
+    #"embassy-executor",
+    #\"embassy-time-timg0",
+    #"embassy-executor-thread",
+    #"embassy-executor-interrupt"
+] }
+esp-hal-embassy = { version = "0.1.0", features = [
+    "time-timg0",            # Compatible with all chips
+    # "time-systimer-16mhz", # Compatible with all chips except ESP32 and ESP32-S2
+    # "time-systimer-80mhz", # Compatible with ESP32-S2 only
 ] }
 esp-println = { version = "0.9.1", features = [
     "esp32",
     "log"
 ] }
-esp-wifi = { version = "0.5.0", features = [
+esp-wifi = { version = "0.6.0", features = [
     "esp32",
     "phy-enable-usb",
     "utils",
@@ -60,7 +65,8 @@ esp-wifi = { version = "0.5.0", features = [
     "async",
     "embassy-net",
     "wifi",
-    "embedded-svc"
+    "embedded-svc",
+    "default"
 ] }
 
 
