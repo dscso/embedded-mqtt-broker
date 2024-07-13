@@ -1,3 +1,5 @@
+use crate::errors::MqttCodecError;
+use embedded_error_chain::ErrorCategory;
 use embedded_io_async::{Read, Write};
 use log::{error, warn};
 use mqtt_format::v5::packets::MqttPacket;
@@ -18,30 +20,24 @@ impl<T, const N: usize> MqttCodec<T, N>
 where
     T: Read + Write,
 {
-    pub fn new(socket: T) -> MqttCodec<T, N> {
+    pub fn new(stream: T) -> MqttCodec<T, N> {
         MqttCodec {
-            stream: socket,
+            stream,
             buf: [0u8; N],
             read: 0,
             write: 0,
         }
     }
-    #[allow(dead_code)]
-    pub fn get_ref(&mut self) -> &T {
-        &self.stream
-    }
-    pub fn get_mut(&mut self) -> &mut T {
-        &mut self.stream
-    }
-    async fn read_stream(&mut self) -> Result<Option<usize>, ()> {
+
+    async fn read_stream(&mut self) -> Result<Option<usize>, MqttCodecError> {
         let n = match self.stream.read(&mut self.buf[self.write..]).await {
             Ok(0) => {
                 return Ok(None);
             }
             Ok(n) => n,
             Err(e) => {
-                warn!("SOCKET: {:?}", e);
-                return Err(());
+                warn!("CODEC: {:?}", e);
+                return Err(MqttCodecError::ConnectionReset);
             }
         };
         self.write += n;
@@ -49,7 +45,7 @@ where
         Ok(Some(n))
     }
 
-    pub async fn next(&mut self) -> Result<Option<MqttPacket>, ()> {
+    pub async fn next(&mut self) -> Result<Option<MqttPacket>, MqttCodecError> {
         // if buffer empty, reset and read from stream
         if self.read == self.write {
             self.read = 0;
@@ -70,7 +66,7 @@ where
                     continue;
                 }
                 // error parsing packet length
-                Err(_) => return Err(()),
+                Err(_) => return Err(MqttCodecError::InvalidLength),
             };
 
             if packet_len >= self.buf.len() {
@@ -80,7 +76,7 @@ where
                     packet_len,
                     self.buf.len()
                 );
-                return Err(());
+                return Err(MqttCodecError::InvalidLength);
             }
             // if not enough data has been received yet
             if self.write - self.read < packet_len {
@@ -91,7 +87,7 @@ where
             self.read += packet_len;
             if self.read > self.buf.len() {
                 error!("read index out of bounds");
-                return Err(());
+                return Err(MqttCodecError::BufferTooSmall);
             }
 
             let packet = MqttPacket::parse_complete(&self.buf[start..self.read]);
@@ -99,24 +95,30 @@ where
                 return Ok(Some(packet));
             }
             error!("error parsing packet {:?}", packet);
-            return Err(());
+            return Err(MqttCodecError::Invalid);
         }
     }
 
-    pub async fn write<'a>(&mut self, packet: MqttPacket<'a>) -> Result<(), ()> {
+    pub async fn write<'a>(&mut self, packet: MqttPacket<'a>) -> Result<(), MqttCodecError> {
         if packet.binary_size() > N as u32 {
             error!(
                 "packet too large to write ({}/{} Bytes)",
                 packet.binary_size(),
                 N
             );
-            return Err(());
+            return Err(MqttCodecError::BufferTooSmall);
         }
         // create a packet writer with the same size as the parser
         let mut writer = PacketWriter::<N>::default();
-        packet.write(&mut writer).map_err(|_| ())?;
-        self.stream.write(writer.get_written_data()).await.unwrap();
-        //.map_err(|_| ())?;
+
+        if let Err(e) = packet.write(&mut writer) {
+            error!("error writing packet {:?}", e);
+            return Err(MqttCodecError::BufferTooSmall);
+        }
+        if let Err(e) = self.stream.write(writer.get_written_data()).await {
+            warn!("codec sending to socket {:?}", e);
+            return Err(MqttCodecError::ConnectionReset);
+        }
         Ok(())
     }
 }

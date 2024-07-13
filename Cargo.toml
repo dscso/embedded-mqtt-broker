@@ -1,4 +1,5 @@
-workspace = { members = ["mqtt-server"] }
+[workspace]
+members = ["mqtt-server"]
 
 [package]
 name = "esp32-rust-mqtt"
@@ -7,12 +8,32 @@ authors = ["Jurek <git@jurek.io>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
+
+[workspace.dependencies]
+log = "0.4.22"
+embassy-time = { version = "0.3.0" }
+embassy-sync = "0.5.0"
+embedded-hal-async = { version = "1.0.0" }
+embedded-io-async = { version = "0.6.0" }
+embassy-futures = { version = "0.1.0" }
+embassy-net-driver = { version = "0.2" }
+embassy-net = { version = "0.4.0", features = [
+    "tcp",
+    "dhcpv4",
+    "medium-ethernet",
+    "igmp",
+    "proto-ipv6",
+    "proto-ipv4",
+    "dns"
+] }
+
+
 [dependencies]
 static_cell = { version = "2.0", features = ["nightly"] }
-log = "0.4.21"
+log = { workspace = true }
 
 # ESP stuff
-esp-backtrace = { version = "0.11.0", features = [
+esp-backtrace = { version = "0.12.1", features = [
     "esp32",
     "exception-handler",
     "panic-handler",
@@ -26,7 +47,7 @@ esp-hal = { version = "0.17.0", features = [
     "embassy-executor-thread",
     "embassy-executor-interrupt"
 ] }
-esp-println = { version = "0.9.0", features = [
+esp-println = { version = "0.9.1", features = [
     "esp32",
     "log"
 ] }
@@ -45,31 +66,17 @@ esp-wifi = { version = "0.5.0", features = [
 
 
 # Embassy stuff
-embassy-time = { version = "0.3.0" }
-embedded-hal-async = { version = "1.0.0" }
-embedded-io-async = { version = "0.6.0" }
-embassy-futures = { version = "0.1.0" }
-embassy-net-driver = { version = "0.2" }
-embassy-net = { version = "0.4.0", features = [
-    "tcp",
-    "udp",
-    "dhcpv4",
-    "medium-ethernet",
-    "default",
-    "medium-ieee802154",
-    "medium-ip",
-    "dns",
-    "dhcpv4-hostname",
-    "igmp",
-    "packet-trace",
-    "proto-ipv6",
-    "proto-ipv4",
-] }
+embassy-time = { workspace = true }
+embedded-hal-async = { workspace = true }
+embedded-io-async = { workspace = true }
+embassy-futures = { workspace = true }
+embassy-net-driver = { workspace = true }
+embassy-net = { workspace = true }
 embassy-executor = { version = "0.5.0", features = [
     "integrated-timers",
     "nightly"
 ] }
-embassy-sync = "0.5.0"
+embassy-sync = { workspace = true}
 mqtt-server = { path = "mqtt-server" }
 
 [profile.dev.package.esp-wifi]

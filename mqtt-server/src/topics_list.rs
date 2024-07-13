@@ -1,3 +1,5 @@
+use crate::errors::TopicsError;
+use embedded_error_chain::ErrorCategory;
 use heapless::{FnvIndexSet, String, Vec};
 
 #[derive(Debug, Default)]
@@ -6,10 +8,12 @@ pub struct TopicsList<const N: usize, const MAX_SUBS: usize> {
 }
 
 impl<const N: usize, const MAX_SUBS: usize> TopicsList<N, MAX_SUBS> {
-    pub(crate) fn insert(&mut self, topic: &str, id: usize) {
+    pub(crate) fn insert(&mut self, topic: &str, id: usize) -> Result<(), TopicsError> {
+        let topic = String::try_from(topic).map_err(|_| TopicsError::TopicTooLong)?;
         self.topics
-            .insert((String::try_from(topic).unwrap(), id))
-            .unwrap();
+            .insert((topic, id))
+            .map_err(|_| TopicsError::Full)?;
+        Ok(())
     }
     pub(crate) fn remove(&mut self, topic: &str, id: usize) {
         self.topics.retain(|(t, i)| t.as_str() != topic || *i != id);
@@ -18,7 +22,7 @@ impl<const N: usize, const MAX_SUBS: usize> TopicsList<N, MAX_SUBS> {
         let mut subscribers = Vec::new();
         for (t, i) in self.topics.iter() {
             if listens_to_topic(t.as_str(), topic) {
-                subscribers.push(*i).unwrap();
+                subscribers.push(*i).unwrap(); // this should never happen since
             }
         }
         subscribers

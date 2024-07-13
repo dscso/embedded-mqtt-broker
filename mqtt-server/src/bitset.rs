@@ -1,19 +1,26 @@
-
-
 #[derive(Debug)]
-pub(crate) struct BitSet<const N: usize> where [(); (N + 31) / 32]: Sized {
-    set: [u32; (N + 31) / 32]
+pub(crate) struct BitSet<const N: usize>
+where
+    [(); (N + 31) / 32]: Sized,
+{
+    set: [u32; (N + 31) / 32],
 }
 
-impl<const N: usize> Default for BitSet<N> where [(); (N + 31) / 32]: Sized {
+impl<const N: usize> Default for BitSet<N>
+where
+    [(); (N + 31) / 32]: Sized,
+{
     fn default() -> Self {
         Self {
-            set: [0; {(N + 31) / 32}]
+            set: [0; { (N + 31) / 32 }],
         }
     }
 }
 
-impl <const N: usize> BitSet<N> where [(); (N + 31) / 32]: Sized {
+impl<const N: usize> BitSet<N>
+where
+    [(); (N + 31) / 32]: Sized,
+{
     pub fn set(&mut self, index: usize) {
         assert!(index < N, "index out of bounds");
         let word = index / 32;
