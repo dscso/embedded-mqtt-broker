@@ -7,7 +7,6 @@ mod sta;
 use crate::sta::connection;
 use core::str::FromStr;
 use embassy_executor::Spawner;
-use embassy_net::dns::DnsQueryType;
 use embassy_net::{Config, ConfigV6, Ipv6Address, Ipv6Cidr, Stack, StackResources, StaticConfigV6};
 use embassy_time::{Duration, Timer};
 use esp_backtrace as _;
@@ -19,14 +18,15 @@ use esp_println::println;
 use esp_wifi::wifi::WifiDevice;
 use esp_wifi::{initialize, wifi::WifiStaDevice, EspWifiInitFor};
 use log::info;
-use mqtt_server::distributor::{InnerDistributor, InnerDistributorMutex};
+use mqtt_server::distributor::InnerDistributor;
 use static_cell::make_static;
+use mqtt_server::config::InnerDistributorMutex;
 
 use mqtt_server::socket::listen;
 
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
-const MAX_CONNECTIONS: usize = 5;
+const MAX_CONNECTIONS: usize = 12;
 
 #[main]
 async fn main(spawner: Spawner) -> ! {

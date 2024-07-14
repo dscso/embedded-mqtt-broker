@@ -1,5 +1,4 @@
 use crate::errors::MqttCodecError;
-use embedded_error_chain::ErrorCategory;
 use embedded_io_async::{Read, Write};
 use log::{error, warn};
 use mqtt_format::v5::packets::MqttPacket;
@@ -8,7 +7,7 @@ use winnow::Partial;
 
 pub(crate) struct MqttCodec<T, const N: usize>
 where
-    T: Read + Write,
+    T: Read,
 {
     stream: T,
     buf: [u8; N],
@@ -16,9 +15,16 @@ where
     write: usize,
 }
 
+pub(crate) struct MqttCodecEncoder<T, const N: usize>
+where
+    T: Write,
+{
+    stream: T,
+}
+
 impl<T, const N: usize> MqttCodec<T, N>
 where
-    T: Read + Write,
+    T: Read,
 {
     pub fn new(stream: T) -> MqttCodec<T, N> {
         MqttCodec {
@@ -98,7 +104,14 @@ where
             return Err(MqttCodecError::Invalid);
         }
     }
-
+}
+impl<T, const N: usize> MqttCodecEncoder<T, N>
+where
+    T: Write,
+{
+    pub fn new(stream: T) -> MqttCodecEncoder<T, N> {
+        MqttCodecEncoder { stream }
+    }
     pub async fn write<'a>(&mut self, packet: MqttPacket<'a>) -> Result<(), MqttCodecError> {
         if packet.binary_size() > N as u32 {
             error!(

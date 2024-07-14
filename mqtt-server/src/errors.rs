@@ -1,5 +1,6 @@
 use embedded_error_chain::ErrorCategory;
 use mqtt_format::v5::packets::disconnect::DisconnectReasonCode;
+use mqtt_format::v5::packets::suback::SubackReasonCode;
 
 #[derive(Clone, Copy, ErrorCategory)]
 #[repr(u8)]
@@ -35,6 +36,19 @@ impl From<DistributorError> for DisconnectReasonCode {
             DistributorError::Unknown => DisconnectReasonCode::UnspecifiedError,
         }
     }
+}
+
+impl From<DistributorError> for SubackReasonCode {
+    fn from(e: DistributorError) -> Self {
+        match e {
+            DistributorError::TopicTooLong => SubackReasonCode::TopicFilterInvalid,
+            DistributorError::MessageTooLong => SubackReasonCode::UnspecifiedError,
+            DistributorError::QueueFull => SubackReasonCode::QuotaExceeded,
+            DistributorError::UnexpectedPacket => SubackReasonCode::ImplementationSpecificError,
+            DistributorError::Unknown => SubackReasonCode::UnspecifiedError,
+        }
+    }
+
 }
 
 #[derive(Clone, Copy, ErrorCategory)]

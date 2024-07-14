@@ -1,5 +1,4 @@
 use crate::errors::TopicsError;
-use embedded_error_chain::ErrorCategory;
 use heapless::{FnvIndexSet, String, Vec};
 
 #[derive(Debug, Default)]

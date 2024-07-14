@@ -42,6 +42,7 @@ where
         self.set[word] & (1 << bit) != 0
     }
 
+    #[allow(dead_code)]
     pub fn iter_ones(&self) -> impl Iterator<Item = usize> + '_ {
         self.set.iter().enumerate().flat_map(|(i, &word)| {
             (0..32).filter_map(move |j| {

@@ -6,21 +6,23 @@ use embassy_net::Stack;
 use embassy_net_driver::Driver;
 use embassy_time::Duration;
 use embedded_io_async::{Read, Write};
-use log::{debug, info, warn};
+use heapless::Vec;
+use log::{info, warn};
 use mqtt_format::v5::packets::connack::{ConnackProperties, ConnackReasonCode, MConnack};
 use mqtt_format::v5::packets::disconnect::{
-    DisconnectProperties, DisconnectReasonCode, MDisconnect,
+    DisconnectProperties, MDisconnect,
 };
 use mqtt_format::v5::packets::pingresp::MPingresp;
 use mqtt_format::v5::packets::puback::{MPuback, PubackProperties, PubackReasonCode};
 use mqtt_format::v5::packets::publish::{MPublish, PublishProperties};
-use mqtt_format::v5::packets::suback::{MSuback, SubackProperties};
+use mqtt_format::v5::packets::suback::{MSuback, SubackProperties, SubackReasonCode};
 use mqtt_format::v5::packets::MqttPacket;
 use mqtt_format::v5::qos::QualityOfService;
 use mqtt_format::v5::variable_header::PacketIdentifier;
 
-use crate::codec::MqttCodec;
-use crate::distributor::{Distributor, InnerDistributorMutex};
+use crate::codec::{MqttCodec, MqttCodecEncoder};
+use crate::config::InnerDistributorMutex;
+use crate::distributor::Distributor;
 use crate::errors::DistributorError;
 
 pub async fn listen<T, const N: usize>(
@@ -33,28 +35,41 @@ pub async fn listen<T, const N: usize>(
 {
     let mut rx_buffer = [0; 1600];
     let mut tx_buffer = [0; 1600];
-    let distributor = Distributor::new(distributor, id).await;
+    let distributor = Distributor::new(distributor, id);
 
     loop {
         // after previous connection is closed, unsubscribe from all topics
-        distributor.unsubscibe_all_topics().await;
+        distributor.unsubscibe_all_topics();
+        // unlock distributor to allow packet reception
+        distributor.unlock();
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
-        socket.set_timeout(Some(Duration::from_secs(10)));
-        socket.set_keep_alive(Some(Duration::from_secs(1)));
+        socket.set_timeout(Some(Duration::from_secs(60)));
+        socket.set_keep_alive(Some(Duration::from_secs(10)));
         info!("SOCKET {}: Listening on TCP:{}...", id, port);
         if let Err(e) = socket.accept(port).await {
             warn!("accept error: {:?}", e);
             continue;
         }
+        // sometimes this fails since connection is closed immediately after accept 🤷‍
+        let addr = match socket.remote_endpoint() {
+            Some(addr) => addr,
+            None => {
+                warn!("SOCKET {}: could not get remote endpoint", id);
+                continue;
+            }
+        };
         info!(
-            "SOCKET {}: Received connection from {:?}",
+            "SOCKET {}: Received connection from {}",
             id,
-            socket.remote_endpoint()
+            addr
         );
+        let (reader, writer) = socket.split();
         // connection handler
-        let mut parser = MqttCodec::<_, 1024>::new(socket);
+        let mut parser = MqttCodec::<_, 1024>::new(reader);
+        let mut encoder = MqttCodecEncoder::<_, 1024>::new(writer);
 
+        info!("SOCKET {}: Handshaking...", id);
         match parser.next().await {
             Ok(Some(MqttPacket::Connect(_connect))) => {
                 let pkg = MqttPacket::Connack(MConnack {
@@ -62,7 +77,7 @@ pub async fn listen<T, const N: usize>(
                     reason_code: ConnackReasonCode::Success,
                     properties: ConnackProperties::new(),
                 });
-                if let Err(e) = parser.write(pkg).await {
+                if let Err(e) = encoder.write(pkg).await {
                     warn!("SOCKET {}: {:?}", id, e);
                     continue;
                 }
@@ -73,13 +88,13 @@ pub async fn listen<T, const N: usize>(
             }
         }
 
-        if let Err(error) = handle_socket(&mut parser, &distributor).await {
+        if let Err(error) = handle_socket(&mut parser, &mut encoder, &distributor).await {
             warn!("SOCKET {}: {:?}", id, error);
             let error = MqttPacket::Disconnect(MDisconnect {
                 reason_code: error.into(),
                 properties: DisconnectProperties::new(),
             });
-            if let Err(e) = parser.write(error).await {
+            if let Err(e) = encoder.write(error).await {
                 warn!(
                     "SOCKET {}: could not close connection because of {:?}",
                     id, e
@@ -90,15 +105,20 @@ pub async fn listen<T, const N: usize>(
     }
 }
 
-async fn handle_socket<'a, T, const CODEC_SIZE: usize, const CONNECTIONS: usize>(
+async fn handle_socket<'a, T, U, const CODEC_SIZE: usize, const ENCODEC_SIZE: usize, const CONNECTIONS: usize>(
     parser: &mut MqttCodec<T, CODEC_SIZE>,
+    encoder: &mut MqttCodecEncoder<U, ENCODEC_SIZE>,
     distributor: &Distributor<CONNECTIONS>,
 ) -> Result<(), DistributorError>
 where
-    T: Write + Read,
+    T: Read,
+    U: Write
 {
     loop {
-        let packet = match select(distributor.next(), parser.next()).await {
+        // unlock after processing packet
+        distributor.unlock();
+        let selected = select(distributor.next(), distributor.lock(parser.next())).await;
+        let packet = match selected {
             First(msg) => {
                 let packet = MqttPacket::Publish(MPublish {
                     duplicate: false,
@@ -110,7 +130,7 @@ where
                     payload: msg.message(),
                 });
                 let start = embassy_time::Instant::now();
-                parser
+                encoder
                     .write(packet)
                     .await
                     .map_err(|_| DistributorError::Unknown)?;
@@ -132,8 +152,7 @@ where
         match packet {
             MqttPacket::Publish(publish) => {
                 distributor
-                    .publish(publish.topic_name, publish.payload)
-                    .await?;
+                    .publish(publish.topic_name, publish.payload)?;
                 let packet_identifier = publish
                     .packet_identifier
                     .unwrap_or(PacketIdentifier(NonZeroU16::new(1).unwrap()));
@@ -142,36 +161,36 @@ where
                     reason: PubackReasonCode::Success,
                     properties: PubackProperties::new(),
                 });
-                parser
+                encoder
                     .write(pkg)
                     .await
                     .map_err(|_| DistributorError::Unknown)?;
             }
             MqttPacket::Subscribe(subscribe) => {
-                let mut reason = Ok(());
-                for s in subscribe.subscriptions.iter() {
-                    debug!("subscribing to: {}", s.topic_filter);
-                    if let Err(e) = distributor.subscribe(s.topic_filter).await {
-                        reason = Err(e);
-                    }
-                }
+                let result = subscribe.subscriptions
+                    .iter()
+                    .filter_map(|s| distributor.subscribe(s.topic_filter).err())
+                    .map(SubackReasonCode::from)
+                    .take(8)
+                    .collect::<Vec<_, 8>>();
+
                 let pkg = MqttPacket::Suback(MSuback {
                     packet_identifier: subscribe.packet_identifier,
                     properties: SubackProperties::new(),
-                    reasons: &[],
+                    reasons: &result,
                 });
-                parser
+                encoder
                     .write(pkg)
                     .await
                     .map_err(|_| DistributorError::Unknown)?;
             }
             MqttPacket::Disconnect(_disconnect) => {
-                info!("SOCKET: disconnecting");
+                info!("SOCKET {}: disconnecting", distributor.get_id());
                 return Ok(());
             }
             MqttPacket::Pingreq(_pingreq) => {
                 let pkg = MqttPacket::Pingresp(MPingresp {});
-                parser
+                encoder
                     .write(pkg)
                     .await
                     .map_err(|_| DistributorError::Unknown)?;
