@@ -1,5 +1,6 @@
+use crate::config::SubscriberBitSet;
 use crate::errors::TopicsError;
-use heapless::{FnvIndexSet, String, Vec};
+use heapless::{FnvIndexSet, String};
 
 #[derive(Debug, Default)]
 pub struct TopicsList<const N: usize, const MAX_SUBS: usize> {
@@ -17,11 +18,11 @@ impl<const N: usize, const MAX_SUBS: usize> TopicsList<N, MAX_SUBS> {
     pub(crate) fn remove(&mut self, topic: &str, id: usize) {
         self.topics.retain(|(t, i)| t.as_str() != topic || *i != id);
     }
-    pub(crate) fn get_subscribed(&self, topic: &str) -> Vec<usize, MAX_SUBS> {
-        let mut subscribers = Vec::new();
+    pub(crate) fn get_subscribed(&self, topic: &str) -> SubscriberBitSet {
+        let mut subscribers = SubscriberBitSet::default();
         for (t, i) in self.topics.iter() {
             if listens_to_topic(t.as_str(), topic) {
-                subscribers.push(*i).unwrap(); // this should never happen since
+                subscribers.set(*i);
             }
         }
         subscribers

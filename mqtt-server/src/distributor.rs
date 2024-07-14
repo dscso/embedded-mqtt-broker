@@ -1,10 +1,15 @@
-use crate::config::{InnerDistributorMutex, SubscriberBitSet, QUEUE_LEN, TREE_SIZE};
+use crate::codec::PacketWriter;
+use crate::config::{
+    InnerDistributorMutex, SubscriberBitSet, MAX_MESSAGE_SIZE, MAX_WILL_LENGTH, QUEUE_LEN,
+    TREE_SIZE,
+};
 use crate::errors::DistributorError;
 use crate::topics_list::TopicsList;
 use core::future::{poll_fn, Future};
 use core::task::{Context, Poll, Waker};
-use heapless::{Deque, String, Vec};
-use log::info;
+use heapless::Deque;
+use mqtt_format::v5::packets::publish::MPublish;
+use mqtt_format::v5::packets::MqttPacket;
 
 #[derive(Debug)]
 pub struct MessageInQueue {
@@ -13,16 +18,13 @@ pub struct MessageInQueue {
 }
 #[derive(Debug, Clone)]
 pub struct Message {
-    topic: String<64>,
-    msg: Vec<u8, 1024>,
+    buf: PacketWriter<MAX_MESSAGE_SIZE>,
 }
 
 impl Message {
-    pub fn topic(&self) -> &str {
-        self.topic.as_str()
-    }
+    #[inline]
     pub fn message(&self) -> &[u8] {
-        self.msg.as_slice()
+        &self.buf.get_written_data()
     }
 }
 pub struct InnerDistributor<const N: usize> {
@@ -59,35 +61,33 @@ impl<const N: usize> InnerDistributor<N> {
             }
         });
     }
-    fn publish(&mut self, topic: &str, msg: &[u8]) -> Result<(), DistributorError> {
-        let message = Vec::from_slice(msg).map_err(|_| DistributorError::MessageTooLong)?;
-        let topic_string = String::try_from(topic).map_err(|_| DistributorError::TopicTooLong)?;
+    fn publish(&mut self, topic: &str, publish: &MPublish) -> Result<(), DistributorError> {
         let subscribers = self.tree.get_subscribed(topic);
         if subscribers.is_empty() {
             return Ok(());
         }
-        let mut sub_bitset = SubscriberBitSet::default();
-        for subscriber in subscribers.iter() {
-            sub_bitset.set(*subscriber);
-        }
-        let msg = Message {
-            topic: topic_string,
-            msg: message,
-        };
+
+        let mut writer = PacketWriter::default();
+        let packet = MqttPacket::Publish(publish.clone());
+        packet
+            .write(&mut writer)
+            .map_err(|_| DistributorError::MessageTooLong)?;
+
+        let message = Message { buf: writer };
+
         let msg = MessageInQueue {
-            subscribers: sub_bitset,
-            message: msg,
+            subscribers,
+            message,
         };
-        self.queue
-            .push_back(msg)
-            .map_err(|e| {
-                panic!("Queue full {:?}\nDied on topic {}", e, topic);
-            }) /*.map_err(|_| DistributorError::QueueFull)*/
-            .unwrap();
-        for i in subscribers.iter() {
-            if let Some(w) = self.wakers[*i].as_ref() {
+
+        for i in msg.subscribers.iter_ones() {
+            if let Some(w) = self.wakers[i].as_ref() {
                 w.wake_by_ref()
             }
+        }
+
+        if let Err(e) = self.queue.push_back(msg) {
+            panic!("Queue full {:?}\nDied on topic {}", e, topic);
         }
         Ok(())
     }
@@ -95,7 +95,7 @@ impl<const N: usize> InnerDistributor<N> {
         self.tree.insert(subscription, id).map_err(|e| e.into())
     }
     fn unsubscribe(&mut self, subscription: &str, id: usize) {
-        self.tree.remove(subscription, id);
+        self.tree.remove(subscription, id)
     }
     fn unsubscribe_all_topics(&mut self, id: usize) {
         self.tree.remove_all_subscriptions(id);
@@ -129,6 +129,7 @@ impl<const N: usize> InnerDistributor<N> {
 pub struct Distributor<const N: usize> {
     id: usize,
     inner: &'static InnerDistributorMutex<N>,
+    will: Option<PacketWriter<MAX_WILL_LENGTH>>,
 }
 
 impl<const N: usize> Distributor<N> {
@@ -145,7 +146,6 @@ impl<const N: usize> Distributor<N> {
     /// ```
     pub(crate) async fn lock<T>(&self, feature: impl Future<Output = T>) -> T {
         let res = feature.await;
-        info!("recv socket");
 
         // delay till there is enough space
         poll_fn(move |cx| {
@@ -176,14 +176,18 @@ impl<const N: usize> Distributor<N> {
 
 impl<const N: usize> Distributor<N> {
     pub fn new(inner: &'static InnerDistributorMutex<N>, id: usize) -> Self {
-        Self { id, inner }
+        Self {
+            id,
+            inner,
+            will: None,
+        }
     }
     pub fn get_id(&self) -> usize {
         self.id
     }
 
-    pub fn publish(&self, topic: &str, msg: &[u8]) -> Result<(), DistributorError> {
-        self.inner.try_lock().unwrap().publish(topic, msg)
+    pub fn publish(&self, topic: &str, publish: &MPublish) -> Result<(), DistributorError> {
+        self.inner.try_lock().unwrap().publish(topic, publish)
     }
     pub fn subscribe(&self, subscription: &str) -> Result<(), DistributorError> {
         self.inner
@@ -191,11 +195,34 @@ impl<const N: usize> Distributor<N> {
             .unwrap()
             .subscribe(subscription, self.id)
     }
-    pub fn unsubscibe_all_topics(&self) {
-        self.inner
-            .try_lock()
-            .unwrap()
-            .unsubscribe_all_topics(self.id);
+    pub async fn cleanup(&mut self) {
+        {
+            let mut inner = self.inner.try_lock().unwrap();
+            inner.unsubscribe_all_topics(self.id);
+            inner.unlock_for_publishing(self.id);
+        }
+
+        if let Some(will) = &self.will {
+            let packet = MqttPacket::parse_complete(will.get_written_data()).unwrap();
+            let packet = match packet {
+                MqttPacket::Publish(ref publish) => publish,
+                _ => unreachable!(),
+            };
+            // wait till there is time to publish message
+            self.lock(async {}).await;
+            let _ = self.publish(packet.topic_name, packet);
+            self.unlock();
+        }
+        self.will = None;
+    }
+
+    pub fn set_will(&mut self, will: MPublish) -> Result<(), DistributorError> {
+        let mut writer = PacketWriter::default();
+        MqttPacket::Publish(will)
+            .write(&mut writer)
+            .map_err(|_| DistributorError::MessageTooLong)?;
+        self.will = Some(writer);
+        Ok(())
     }
     pub fn unsubscribe(&self, subscription: &str) {
         self.inner

@@ -26,7 +26,7 @@ use mqtt_server::socket::listen;
 
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("PASSWORD");
-const MAX_CONNECTIONS: usize = 12;
+const MAX_CONNECTIONS: usize = 14;
 
 #[main]
 async fn main(spawner: Spawner) -> ! {

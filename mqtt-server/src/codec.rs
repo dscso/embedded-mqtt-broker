@@ -5,7 +5,7 @@ use mqtt_format::v5::packets::MqttPacket;
 use mqtt_format::v5::write::{MqttWriteError, WResult, WriteMqttPacket};
 use winnow::Partial;
 
-pub(crate) struct MqttCodec<T, const N: usize>
+pub(crate) struct MqttCodecDecoder<T, const N: usize>
 where
     T: Read,
 {
@@ -22,12 +22,12 @@ where
     stream: T,
 }
 
-impl<T, const N: usize> MqttCodec<T, N>
+impl<T, const N: usize> MqttCodecDecoder<T, N>
 where
     T: Read,
 {
-    pub fn new(stream: T) -> MqttCodec<T, N> {
-        MqttCodec {
+    pub fn new(stream: T) -> MqttCodecDecoder<T, N> {
+        MqttCodecDecoder {
             stream,
             buf: [0u8; N],
             read: 0,
@@ -136,6 +136,7 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct PacketWriter<const N: usize> {
     pub buffer: [u8; N],
     pub write_index: usize,
@@ -159,12 +160,18 @@ impl<const N: usize> WriteMqttPacket for PacketWriter<N> {
 
     #[inline]
     fn write_byte(&mut self, u: u8) -> WResult<Self> {
+        if self.write_index + 1 > N {
+            return Err(MqttWriteError::Invariant);
+        }
         self.buffer[self.write_index] = u;
         self.write_index += 1;
         Ok(())
     }
 
     fn write_slice(&mut self, u: &[u8]) -> WResult<Self> {
+        if self.write_index + u.len() > N {
+            return Err(MqttWriteError::Invariant);
+        }
         self.buffer[self.write_index..self.write_index + u.len()].copy_from_slice(u);
         self.write_index += u.len();
         Ok(())
