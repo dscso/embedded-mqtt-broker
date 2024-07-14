@@ -48,7 +48,6 @@ impl From<DistributorError> for SubackReasonCode {
             DistributorError::Unknown => SubackReasonCode::UnspecifiedError,
         }
     }
-
 }
 
 #[derive(Clone, Copy, ErrorCategory)]

@@ -1,11 +1,10 @@
+use crate::config::{InnerDistributorMutex, SubscriberBitSet, QUEUE_LEN, TREE_SIZE};
 use crate::errors::DistributorError;
 use crate::topics_list::TopicsList;
 use core::future::{poll_fn, Future};
 use core::task::{Context, Poll, Waker};
 use heapless::{Deque, String, Vec};
 use log::info;
-use crate::config::{SubscriberBitSet, QUEUE_LEN, TREE_SIZE, InnerDistributorMutex};
-
 
 #[derive(Debug)]
 pub struct MessageInQueue {
@@ -31,7 +30,7 @@ pub struct InnerDistributor<const N: usize> {
     tree: TopicsList<TREE_SIZE, N>,
     wakers: [Option<Waker>; N],
     lock_wakers: [Option<Waker>; N],
-    lock: SubscriberBitSet
+    lock: SubscriberBitSet,
 }
 
 impl<const N: usize> Default for InnerDistributor<N> {
@@ -79,9 +78,12 @@ impl<const N: usize> InnerDistributor<N> {
             subscribers: sub_bitset,
             message: msg,
         };
-        self.queue.push_back(msg).map_err(|e| {
-            panic!("Queue full {:?}\nDied on topic {}", e, topic);
-        })/*.map_err(|_| DistributorError::QueueFull)*/.unwrap();
+        self.queue
+            .push_back(msg)
+            .map_err(|e| {
+                panic!("Queue full {:?}\nDied on topic {}", e, topic);
+            }) /*.map_err(|_| DistributorError::QueueFull)*/
+            .unwrap();
         for i in subscribers.iter() {
             if let Some(w) = self.wakers[*i].as_ref() {
                 w.wake_by_ref()
@@ -114,15 +116,11 @@ impl<const N: usize> InnerDistributor<N> {
 
     #[allow(unused)]
     fn get_last(&self, id: usize) -> Option<&MessageInQueue> {
-        self
-            .queue
-            .back()
-            .filter(|last| last.subscribers.get(id))
+        self.queue.back().filter(|last| last.subscribers.get(id))
     }
     #[allow(unused)]
     fn get_last_mut(&mut self, id: usize) -> Option<&mut MessageInQueue> {
-        self
-            .queue
+        self.queue
             .back_mut()
             .filter(|last| last.subscribers.get(id))
     }
@@ -132,7 +130,6 @@ pub struct Distributor<const N: usize> {
     id: usize,
     inner: &'static InnerDistributorMutex<N>,
 }
-
 
 impl<const N: usize> Distributor<N> {
     /// This function so the server only processes n MQTT messages at a time
@@ -146,7 +143,7 @@ impl<const N: usize> Distributor<N> {
     ///     distributor.unlock();
     /// }
     /// ```
-    pub(crate) async fn lock<T>(&self, feature: impl Future<Output=T>) -> T  {
+    pub(crate) async fn lock<T>(&self, feature: impl Future<Output = T>) -> T {
         let res = feature.await;
         info!("recv socket");
 
@@ -163,35 +160,48 @@ impl<const N: usize> Distributor<N> {
             } else {
                 inner.lock_wakers[self.id] = Some(cx.waker().clone());
                 Poll::Pending
-            }
-        }).await;
+            };
+        })
+        .await;
 
         res
     }
     pub fn unlock(&self) {
-        self.inner.try_lock().unwrap().unlock_for_publishing(self.id);
+        self.inner
+            .try_lock()
+            .unwrap()
+            .unlock_for_publishing(self.id);
     }
 }
 
-impl<'a, const N: usize> Distributor<N> {
+impl<const N: usize> Distributor<N> {
     pub fn new(inner: &'static InnerDistributorMutex<N>, id: usize) -> Self {
         Self { id, inner }
     }
     pub fn get_id(&self) -> usize {
         self.id
     }
-    
+
     pub fn publish(&self, topic: &str, msg: &[u8]) -> Result<(), DistributorError> {
         self.inner.try_lock().unwrap().publish(topic, msg)
     }
     pub fn subscribe(&self, subscription: &str) -> Result<(), DistributorError> {
-        self.inner.try_lock().unwrap().subscribe(subscription, self.id)
+        self.inner
+            .try_lock()
+            .unwrap()
+            .subscribe(subscription, self.id)
     }
     pub fn unsubscibe_all_topics(&self) {
-        self.inner.try_lock().unwrap().unsubscribe_all_topics(self.id);
+        self.inner
+            .try_lock()
+            .unwrap()
+            .unsubscribe_all_topics(self.id);
     }
     pub fn unsubscribe(&self, subscription: &str) {
-        self.inner.try_lock().unwrap().unsubscribe(subscription, self.id);
+        self.inner
+            .try_lock()
+            .unwrap()
+            .unsubscribe(subscription, self.id);
     }
     pub fn next(&self) -> impl Future<Output = Message> + '_ {
         poll_fn(move |cx| self.poll_next(cx, self.id))

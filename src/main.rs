@@ -18,9 +18,9 @@ use esp_println::println;
 use esp_wifi::wifi::WifiDevice;
 use esp_wifi::{initialize, wifi::WifiStaDevice, EspWifiInitFor};
 use log::info;
+use mqtt_server::config::InnerDistributorMutex;
 use mqtt_server::distributor::InnerDistributor;
 use static_cell::make_static;
-use mqtt_server::config::InnerDistributorMutex;
 
 use mqtt_server::socket::listen;
 

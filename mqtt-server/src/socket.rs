@@ -9,9 +9,7 @@ use embedded_io_async::{Read, Write};
 use heapless::Vec;
 use log::{info, warn};
 use mqtt_format::v5::packets::connack::{ConnackProperties, ConnackReasonCode, MConnack};
-use mqtt_format::v5::packets::disconnect::{
-    DisconnectProperties, MDisconnect,
-};
+use mqtt_format::v5::packets::disconnect::{DisconnectProperties, MDisconnect};
 use mqtt_format::v5::packets::pingresp::MPingresp;
 use mqtt_format::v5::packets::puback::{MPuback, PubackProperties, PubackReasonCode};
 use mqtt_format::v5::packets::publish::{MPublish, PublishProperties};
@@ -59,11 +57,7 @@ pub async fn listen<T, const N: usize>(
                 continue;
             }
         };
-        info!(
-            "SOCKET {}: Received connection from {}",
-            id,
-            addr
-        );
+        info!("SOCKET {}: Received connection from {}", id, addr);
         let (reader, writer) = socket.split();
         // connection handler
         let mut parser = MqttCodec::<_, 1024>::new(reader);
@@ -105,14 +99,21 @@ pub async fn listen<T, const N: usize>(
     }
 }
 
-async fn handle_socket<'a, T, U, const CODEC_SIZE: usize, const ENCODEC_SIZE: usize, const CONNECTIONS: usize>(
+async fn handle_socket<
+    'a,
+    T,
+    U,
+    const CODEC_SIZE: usize,
+    const ENCODEC_SIZE: usize,
+    const CONNECTIONS: usize,
+>(
     parser: &mut MqttCodec<T, CODEC_SIZE>,
     encoder: &mut MqttCodecEncoder<U, ENCODEC_SIZE>,
     distributor: &Distributor<CONNECTIONS>,
 ) -> Result<(), DistributorError>
 where
     T: Read,
-    U: Write
+    U: Write,
 {
     loop {
         // unlock after processing packet
@@ -151,8 +152,7 @@ where
 
         match packet {
             MqttPacket::Publish(publish) => {
-                distributor
-                    .publish(publish.topic_name, publish.payload)?;
+                distributor.publish(publish.topic_name, publish.payload)?;
                 let packet_identifier = publish
                     .packet_identifier
                     .unwrap_or(PacketIdentifier(NonZeroU16::new(1).unwrap()));
@@ -167,7 +167,8 @@ where
                     .map_err(|_| DistributorError::Unknown)?;
             }
             MqttPacket::Subscribe(subscribe) => {
-                let result = subscribe.subscriptions
+                let result = subscribe
+                    .subscriptions
                     .iter()
                     .filter_map(|s| distributor.subscribe(s.topic_filter).err())
                     .map(SubackReasonCode::from)

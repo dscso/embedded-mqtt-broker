@@ -7,6 +7,6 @@ pub mod distributor;
 pub mod socket;
 //mod topics;
 mod bitset;
+pub mod config;
 mod errors;
 mod topics_list;
-pub mod config;
