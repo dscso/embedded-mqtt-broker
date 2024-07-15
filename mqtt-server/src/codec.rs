@@ -73,6 +73,7 @@ where
                     if self.read_stream().await?.is_none() {
                         return Ok(None);
                     }
+                    self.read_stream().await?;
                     continue;
                 }
                 // error parsing packet length
@@ -90,6 +91,7 @@ where
             }
             // if not enough data has been received yet
             if self.write - self.read < packet_len {
+                self.read_stream().await?;
                 continue;
             }
 

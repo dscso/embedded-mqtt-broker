@@ -133,10 +133,10 @@ pub struct Distributor<const N: usize> {
 }
 
 impl<const N: usize> Distributor<N> {
-    /// This function so the server only processes n MQTT messages at a time
+    /// use this function so the server only processes n MQTT messages at a time
     /// were: n = QUEUE_LEN
     /// it should be used as follows
-    /// ```example
+    /// ```no_run
     /// loop {
     ///     let msg = match select(distributor.next(), distributor.lock(parser.next())).await {
     ///         ...
@@ -144,7 +144,7 @@ impl<const N: usize> Distributor<N> {
     ///     distributor.unlock();
     /// }
     /// ```
-    pub(crate) async fn lock<T>(&self, feature: impl Future<Output = T>) -> T {
+    pub async fn lock<T>(&self, feature: impl Future<Output = T>) -> T {
         let res = feature.await;
 
         // delay till there is enough space

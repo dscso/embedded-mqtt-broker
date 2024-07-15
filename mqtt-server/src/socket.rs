@@ -4,7 +4,7 @@ use embassy_futures::select::Either::{First, Second};
 use embassy_net::tcp::TcpSocket;
 use embassy_net::Stack;
 use embassy_net_driver::Driver;
-use embassy_time::Duration;
+use embassy_time::{with_timeout, Duration};
 use embedded_io_async::{Read, Write};
 use heapless::Vec;
 use log::{info, warn};
@@ -65,8 +65,9 @@ pub async fn listen<T, const N: usize>(
         let mut encoder = MqttCodecEncoder::<_, 1024>::new(writer);
 
         info!("SOCKET {}: Handshaking...", id);
-        match parser.next().await {
-            Ok(Some(MqttPacket::Connect(connect))) => {
+        let timout = Duration::from_secs(10);
+        match with_timeout(timout, parser.next()).await {
+            Ok(Ok(Some(MqttPacket::Connect(connect)))) => {
                 if let Some(conn_will) = connect.will {
                     let will = MPublish {
                         duplicate: false,
@@ -93,7 +94,11 @@ pub async fn listen<T, const N: usize>(
                     continue;
                 }
             }
-            e => {
+            Err(_e) => {
+                warn!("SOCKET {}: connection to first packet timeout...", id);
+                continue;
+            }
+            Ok(e) => {
                 warn!("SOCKET {}: error decoding packet {:?}", id, e);
                 continue;
             }
