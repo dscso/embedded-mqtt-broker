@@ -1,6 +1,9 @@
-#![no_std]
 #![feature(generic_const_exprs)]
 #![feature(type_alias_impl_trait)]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(feature = "std")]
+extern crate core;
 
 pub mod codec;
 pub mod distributor;

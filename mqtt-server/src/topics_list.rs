@@ -1,10 +1,10 @@
-use crate::config::SubscriberBitSet;
+use crate::config::{SubscriberBitSet, Topic};
 use crate::errors::TopicsError;
 use heapless::{FnvIndexSet, String};
 
 #[derive(Debug, Default)]
 pub struct TopicsList<const N: usize, const MAX_SUBS: usize> {
-    topics: FnvIndexSet<(String<64>, usize), N>,
+    topics: FnvIndexSet<(Topic, usize), N>,
 }
 
 impl<const N: usize, const MAX_SUBS: usize> TopicsList<N, MAX_SUBS> {

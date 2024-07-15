@@ -19,4 +19,7 @@ log = { workspace = true }
 embedded-io-async = { workspace = true }
 embassy-time = { workspace = true }
 
+[dev-dependencies]
+static_cell = { version = "2.0", features = ["nightly"] }
+
 

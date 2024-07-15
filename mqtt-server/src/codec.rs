@@ -5,6 +5,8 @@ use mqtt_format::v5::packets::MqttPacket;
 use mqtt_format::v5::write::{MqttWriteError, WResult, WriteMqttPacket};
 use winnow::Partial;
 
+/// Decodes MQTT Packets into a stream
+/// packets that are bigger than N will throw an error
 pub(crate) struct MqttCodecDecoder<T, const N: usize>
 where
     T: Read,
@@ -15,6 +17,8 @@ where
     write: usize,
 }
 
+/// Encodes MQTT packets into a stream
+/// packets that are bigger than N will throw an error
 pub(crate) struct MqttCodecEncoder<T, const N: usize>
 where
     T: Write,
@@ -135,7 +139,7 @@ where
         Ok(())
     }
 }
-
+/// Used to encode a packet into a buffer
 #[derive(Debug, Clone)]
 pub struct PacketWriter<const N: usize> {
     pub buffer: [u8; N],

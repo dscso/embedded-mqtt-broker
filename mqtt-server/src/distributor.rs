@@ -166,6 +166,7 @@ impl<const N: usize> Distributor<N> {
 
         res
     }
+    /// unlocks previously locked with `lock` function
     pub fn unlock(&self) {
         self.inner
             .try_lock()
@@ -186,22 +187,26 @@ impl<const N: usize> Distributor<N> {
         self.id
     }
 
+    /// Publishes a message to all subscribers of a topic
     pub fn publish(&self, topic: &str, publish: &MPublish) -> Result<(), DistributorError> {
         self.inner.try_lock().unwrap().publish(topic, publish)
     }
+    /// Subscribes to a topic
     pub fn subscribe(&self, subscription: &str) -> Result<(), DistributorError> {
         self.inner
             .try_lock()
             .unwrap()
             .subscribe(subscription, self.id)
     }
-    pub async fn cleanup(&mut self) {
-        {
-            let mut inner = self.inner.try_lock().unwrap();
-            inner.unsubscribe_all_topics(self.id);
-            inner.unlock_for_publishing(self.id);
-        }
+    /// should always be called when socket connection is closed.
+    /// cleans up all previous subscriptions and unlocks distributor for new messages to be received
+    pub fn cleanup(&self) {
+        let mut inner = self.inner.try_lock().unwrap();
+        inner.unsubscribe_all_topics(self.id);
+        inner.unlock_for_publishing(self.id);
+    }
 
+    pub async fn fulfill_will(&mut self) {
         if let Some(will) = &self.will {
             let packet = MqttPacket::parse_complete(will.get_written_data()).unwrap();
             let packet = match packet {
@@ -264,5 +269,41 @@ impl<const N: usize> Distributor<N> {
         }
         inner.wakers[id] = None;
         Poll::Ready(message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use log;
+    use mqtt_format::v5::packets::publish::PublishProperties;
+    use mqtt_format::v5::qos::QualityOfService;
+    use static_cell::make_static;
+
+    #[test]
+    fn test_cleanup() {
+        let inner = &*make_static!(InnerDistributorMutex::new(InnerDistributor::<10>::default()));
+        let dist0 = Distributor::new(&inner, 0);
+        let dist1 = Distributor::new(&inner, 1);
+        dist0.subscribe("/a/b/c").unwrap();
+        dist0.subscribe("/a/b/d").unwrap();
+        dist0.subscribe("/a/b/e").unwrap();
+        dist0.subscribe("/a/b/f").unwrap();
+        dist1.subscribe("/a").unwrap();
+        let publish = MPublish {
+            duplicate: false,
+            quality_of_service: QualityOfService::AtMostOnce,
+            retain: false,
+            topic_name: "",
+            packet_identifier: None,
+            properties: PublishProperties::new(),
+            payload: &[],
+        };
+        dist0.publish("/a", &publish).unwrap();
+        assert_eq!(dist0.inner.try_lock().unwrap().queue.len(), 1);
+        dist0.cleanup();
+        assert_eq!(dist0.inner.try_lock().unwrap().queue.len(), 1);
+        dist1.cleanup();
+        assert_eq!(dist0.inner.try_lock().unwrap().queue.len(), 0);
     }
 }

@@ -39,7 +39,8 @@ pub async fn listen<T, const N: usize>(
     loop {
         // cleanup previous connection settings
         // unlocks distributor as well
-        distributor.cleanup().await;
+        distributor.cleanup();
+        distributor.fulfill_will().await;
 
         let mut socket = TcpSocket::new(stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(Duration::from_secs(60)));
