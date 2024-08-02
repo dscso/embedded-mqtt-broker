@@ -183,6 +183,7 @@ impl<const N: usize> Distributor<N> {
             will: None,
         }
     }
+    /// gets the socket id
     pub fn get_id(&self) -> usize {
         self.id
     }
@@ -191,6 +192,7 @@ impl<const N: usize> Distributor<N> {
     pub fn publish(&self, topic: &str, publish: &MPublish) -> Result<(), DistributorError> {
         self.inner.try_lock().unwrap().publish(topic, publish)
     }
+
     /// Subscribes to a topic
     pub fn subscribe(&self, subscription: &str) -> Result<(), DistributorError> {
         self.inner
@@ -198,6 +200,7 @@ impl<const N: usize> Distributor<N> {
             .unwrap()
             .subscribe(subscription, self.id)
     }
+
     /// should always be called when socket connection is closed.
     /// cleans up all previous subscriptions and unlocks distributor for new messages to be received
     pub fn cleanup(&self) {
@@ -206,6 +209,7 @@ impl<const N: usize> Distributor<N> {
         inner.unlock_for_publishing(self.id);
     }
 
+    /// fulfill will and publish will message to defined topic
     pub async fn fulfill_will(&mut self) {
         if let Some(will) = &self.will {
             let packet = MqttPacket::parse_complete(will.get_written_data()).unwrap();
@@ -229,12 +233,18 @@ impl<const N: usize> Distributor<N> {
         self.will = Some(writer);
         Ok(())
     }
+
+    pub fn unset_will(&mut self) {
+        self.will = None;
+    }
+
     pub fn unsubscribe(&self, subscription: &str) {
         self.inner
             .try_lock()
             .unwrap()
             .unsubscribe(subscription, self.id);
     }
+
     pub fn next(&self) -> impl Future<Output = Message> + '_ {
         poll_fn(move |cx| self.poll_next(cx, self.id))
     }

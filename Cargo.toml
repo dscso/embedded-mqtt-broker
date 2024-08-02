@@ -24,7 +24,7 @@ embassy-net = { git = "https://github.com/dscso/embassy", rev = "121b556", featu
     "igmp",
     "proto-ipv6",
     "proto-ipv4",
-    "dns"
+    "dns",
 ] }
 
 

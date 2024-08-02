@@ -121,7 +121,6 @@ pub async fn listen<T, const N: usize>(
 }
 
 async fn handle_socket<
-    'a,
     T,
     U,
     const DECODER_SIZE: usize,

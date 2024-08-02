@@ -120,8 +120,8 @@ async fn main(spawner: Spawner) -> ! {
         }
         //let res = stack.dns_query("google.de", DnsQueryType::A).await;
         //println!("DNS query result: {:?}", res);
-        println!("🐶");
-        Timer::after(Duration::from_secs(1)).await;
+        info!("watchdog 🐾");
+        Timer::after(Duration::from_secs(60)).await;
     }
 }
 
