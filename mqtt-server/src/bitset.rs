@@ -1,42 +1,33 @@
+/// Sets the maximum amount of elements in the bitset
+const N: usize = 2;
 #[derive(Debug)]
-pub(crate) struct BitSet<const N: usize>
-where
-    [(); (N + 31) / 32]: Sized,
-{
-    set: [u32; (N + 31) / 32],
+pub(crate) struct BitSet {
+    set: [u32; N],
 }
 
-impl<const N: usize> Default for BitSet<N>
-where
-    [(); (N + 31) / 32]: Sized,
-{
+impl Default for BitSet {
     fn default() -> Self {
-        Self {
-            set: [0; { (N + 31) / 32 }],
-        }
+        Self { set: [0; N] }
     }
 }
 
-impl<const N: usize> BitSet<N>
-where
-    [(); (N + 31) / 32]: Sized,
-{
+impl BitSet {
     pub fn set(&mut self, index: usize) {
-        assert!(index < N, "index out of bounds");
+        assert!(index < N * 32, "index out of bounds");
         let word = index / 32;
         let bit = index % 32;
         self.set[word] |= 1 << bit;
     }
 
     pub fn unset(&mut self, index: usize) {
-        assert!(index < N, "index out of bounds");
+        assert!(index < N * 32, "index out of bounds");
         let word = index / 32;
         let bit = index % 32;
         self.set[word] &= !(1 << bit);
     }
 
     pub fn get(&self, index: usize) -> bool {
-        assert!(index < N, "index out of bounds");
+        assert!(index < N * 32, "index out of bounds");
         let word = index / 32;
         let bit = index % 32;
         self.set[word] & (1 << bit) != 0

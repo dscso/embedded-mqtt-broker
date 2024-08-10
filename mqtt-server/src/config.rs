@@ -19,5 +19,5 @@ pub const MAX_TOPIC_LENGTH: usize = 64;
 
 pub type Topic = String<MAX_TOPIC_LENGTH>;
 /// This defines how many socket connections are supported by the underlying datastructures
-pub(crate) type SubscriberBitSet = BitSet<64>;
+pub(crate) type SubscriberBitSet = BitSet;
 pub type InnerDistributorMutex<const N: usize> = Mutex<NoopRawMutex, InnerDistributor<N>>;
