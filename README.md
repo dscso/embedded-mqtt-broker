@@ -9,9 +9,8 @@ retained messages are not supportet for the moment due to memory constrains. It 
 
 ## Run on ESP32
 
-1. Install Rust as described [here](https://rustup.rs/)
-2. Install the ESP32 build toolchain as described [here](https://docs.esp-rs.org/book/installation/riscv-and-xtensa.html)
-3. Install espflash using `cargo install espflash`
+1. Install the ESP32 build toolchain as described [here](https://docs.esp-rs.org/book/installation/riscv-and-xtensa.html)
+2. Install espflash
 
 ```bash
 cargo install espup
@@ -25,3 +24,16 @@ PASSWORD="<password>" SSID="<ssid>" cargo run --release
 ```
 
 Now the programm should get flashed to the ESP32
+
+## Run on STM32F767ZI
+
+Install the flashing software for STM32
+```bash
+cargo install probe-rs-tools --locked
+```
+
+to run the code go to `stm32` and execute the following command: 
+
+```bash
+cargo run --release
+```
