@@ -83,7 +83,7 @@ embassy-executor = { version = "0.5.0", features = [
     "nightly"
 ] }
 embassy-sync = { workspace = true}
-mqtt-server = { path = "mqtt-server" }
+mqtt-server = { path = "mqtt-server", features = ["log"]}
 
 [profile.dev.package.esp-wifi]
 opt-level = 3
