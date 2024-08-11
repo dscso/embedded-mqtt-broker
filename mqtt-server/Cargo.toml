@@ -15,11 +15,14 @@ embassy-sync = { workspace = true }
 embassy-futures = { workspace = true }
 embassy-net-driver = { workspace = true }
 embassy-net = {  workspace = true }
-log = { workspace = true }
 embedded-io-async = { workspace = true }
 embassy-time = { workspace = true }
+log = { version = "0.4.22", optional = true }
+defmt = { version = "0.3.8", optional = true }
 
 [dev-dependencies]
 static_cell = { version = "2.0", features = ["nightly"] }
 
-
+[features]
+defmt = ["dep:defmt"]
+log = ["dep:log"]

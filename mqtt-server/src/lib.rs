@@ -11,3 +11,4 @@ mod bitset;
 pub mod config;
 mod errors;
 mod topics_list;
+mod log;

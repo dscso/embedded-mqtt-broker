@@ -7,7 +7,6 @@ use embassy_net_driver::Driver;
 use embassy_time::{with_timeout, Duration};
 use embedded_io_async::{Read, Write};
 use heapless::Vec;
-use log::{info, warn};
 use mqtt_format::v5::packets::connack::{ConnackProperties, ConnackReasonCode, MConnack};
 use mqtt_format::v5::packets::disconnect::{DisconnectProperties, MDisconnect};
 use mqtt_format::v5::packets::pingresp::MPingresp;
@@ -23,6 +22,7 @@ use crate::codec::{MqttCodecDecoder, MqttCodecEncoder};
 use crate::config::InnerDistributorMutex;
 use crate::distributor::Distributor;
 use crate::errors::DistributorError;
+use crate::log::{info, warn};
 
 pub async fn listen<T, const N: usize>(
     stack: &'static Stack<T>,
@@ -99,6 +99,8 @@ pub async fn listen<T, const N: usize>(
                 continue;
             }
             Ok(e) => {
+                #[cfg(feature = "defmt")]
+                let e = ();
                 warn!("SOCKET {}: error decoding packet {:?}", id, e);
                 continue;
             }
@@ -230,6 +232,9 @@ where
                 // nothing to do (yet)
             }
             pkg => {
+                #[cfg(feature = "defmt")]
+                let pkg = ();
+
                 warn!(
                     "SOCKET {}: unexpected packet {:?}",
                     distributor.get_id(),

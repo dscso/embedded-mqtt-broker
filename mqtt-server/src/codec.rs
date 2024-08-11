@@ -1,6 +1,6 @@
 use crate::errors::MqttCodecError;
 use embedded_io_async::{Read, Write};
-use log::{error, warn};
+use crate::log::{error, warn};
 use mqtt_format::v5::packets::MqttPacket;
 use mqtt_format::v5::write::{MqttWriteError, WResult, WriteMqttPacket};
 use winnow::Partial;
@@ -46,6 +46,9 @@ where
             }
             Ok(n) => n,
             Err(e) => {
+                #[cfg(feature = "defmt")]
+                let e = "error";
+
                 warn!("CODEC: {:?}", e);
                 return Err(MqttCodecError::ConnectionReset);
             }
@@ -106,6 +109,7 @@ where
             if let Ok(packet) = packet {
                 return Ok(Some(packet));
             }
+            #[cfg(features = "log")]
             error!("error parsing packet {:?}", packet);
             return Err(MqttCodecError::Invalid);
         }
@@ -131,10 +135,12 @@ where
         let mut writer = PacketWriter::<N>::default();
 
         if let Err(e) = packet.write(&mut writer) {
+            #[cfg(features = "log")]
             error!("error writing packet {:?}", e);
             return Err(MqttCodecError::BufferTooSmall);
         }
         if let Err(e) = self.stream.write(writer.get_written_data()).await {
+            #[cfg(features = "log")]
             warn!("codec sending to socket {:?}", e);
             return Err(MqttCodecError::ConnectionReset);
         }

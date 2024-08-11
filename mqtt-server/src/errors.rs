@@ -2,6 +2,7 @@ use embedded_error_chain::ErrorCategory;
 use mqtt_format::v5::packets::disconnect::DisconnectReasonCode;
 use mqtt_format::v5::packets::suback::SubackReasonCode;
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Copy, ErrorCategory)]
 #[repr(u8)]
 pub enum DistributorError {
@@ -50,6 +51,7 @@ impl From<DistributorError> for SubackReasonCode {
     }
 }
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Copy, ErrorCategory)]
 #[repr(u8)]
 pub enum MqttCodecError {
@@ -60,6 +62,7 @@ pub enum MqttCodecError {
     ConnectionReset,
 }
 
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(Clone, Copy, ErrorCategory)]
 #[repr(u8)]
 pub enum TopicsError {
